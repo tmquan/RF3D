@@ -131,7 +131,6 @@ class RF3DLightningModule(LightningModule):
         elev_random = torch.zeros(self.batch_size, device=_device)
         azim_random = torch.rand_like(elev_random) * 2 - 1 # [0 1) to [-1 1)
         view_random = make_cameras_dea(dist_random, elev_random, azim_random)
-         
 
         dist_hidden = 10.0 * torch.ones(self.batch_size, device=_device)
         elev_hidden = torch.zeros(self.batch_size, device=_device)
@@ -146,178 +145,44 @@ class RF3DLightningModule(LightningModule):
         
         view_shape_ = [self.batch_size, 1] 
             
-        if not self.sup:
-            timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
-            
-            volume_ct_latent = torch.randn_like(image3d)
-            figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random, is_training=(stage=='train'))
-            
-            volume_ct_interp = self.noise_scheduler.add_noise(image3d, volume_ct_latent, timesteps=timesteps)
-            figure_ct_interp = self.forward_screen(image3d=volume_ct_interp, cameras=view_random, is_training=(stage=='train'))
-            
-            # volume_ct_output = self.forward_volume(
-            #     image2d=figure_ct_interp, 
-            #     elev=timesteps.view(view_shape_),
-            #     azim=azim_random.view(view_shape_),
-            #     n_views=[1]
-            # )
-            # figure_ct_output = self.forward_screen(image3d=volume_ct_output, cameras=view_random, is_training=(stage=='train'))
-            
-            
-            # volume_xr_latent = torch.randn_like(image3d)
-            # figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_hidden, is_training=(stage=='train'))
-            figure_xr_latent = torch.randn_like(image2d)
-            figure_xr_interp = self.noise_scheduler.add_noise(image2d, figure_xr_latent, timesteps=timesteps)
-            
-            # volume_xr_output = self.forward_volume(
-            #     image2d=figure_xr_interp, 
-            #     elev=timesteps.view(view_shape_),
-            #     azim=azim_random.view(view_shape_),
-            #     n_views=[1]
-            # )
-            
-            volume_dx_output = self.forward_volume(
-                image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
-                elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
-                azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-                n_views=[1, 1]
-            )
-            volume_ct_output, volume_xr_output = torch.split(volume_dx_output, batchsz)
-            
-            figure_ct_output = self.forward_screen(image3d=volume_ct_output, cameras=view_random, is_training=(stage=='train'))
-            figure_xr_output = self.forward_screen(image3d=volume_xr_output, cameras=view_hidden, is_training=(stage=='train'))
-            
-            diff_loss = self.l1loss(volume_ct_output, volume_ct_latent) \
-                      + self.l1loss(figure_ct_output, figure_ct_latent) \
-                      + self.l1loss(figure_xr_output, figure_xr_latent) 
-            # # Sample noise that we shall add to the images
-            # volume_ct_latent = torch.randn_like(image3d)
-            # volume_xr_latent = torch.randn_like(image3d)
-            # volume_dx_latent = torch.cat([volume_ct_latent, volume_xr_latent])
-            # figure_dx_latent = self.forward_screen(image3d=volume_dx_latent, cameras=camera_dx_concat, is_training=(stage=='train'))
-            
-            # # figure_ct_latent = torch.randn_like(image2d)
-            # # figure_xr_latent = torch.randn_like(image2d)
-            # # figure_dx_latent = torch.cat([figure_ct_latent, figure_xr_latent])
-            # figure_ct_latent, figure_xr_latent = torch.split(figure_dx_latent, batchsz)
-            
-            # # Add noise to the clean images according to the noise magnitude at each timestep
-            # timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
-            # figure_dx_interp = self.noise_scheduler.add_noise(figure_dx_concat, figure_dx_latent, timesteps)
-            # volume_dx_output = self.forward_volume(
-            #     image2d=figure_dx_interp, #torch.cat([figure_ct_latent, figure_xr_latent]),
-            #     elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
-            #     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-            #     n_views=[1, 1]
-            # )
-            # figure_dx_output = self.forward_screen(image3d=volume_dx_output, cameras=camera_dx_concat, is_training=(stage=='train'))
-            # figure_ct_output, figure_xr_output = torch.split(figure_dx_output, batchsz)
-            
-            # diff_loss = self.l1loss(volume_dx_output, volume_dx_latent) + self.l1loss(figure_dx_output, figure_dx_latent)
-            self.log(f'{stage}_diff_loss', diff_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-            
-            loss = diff_loss
-        else:
-            if batch_idx%2==0:
-                timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
-            
-                volume_ct_latent = torch.randn_like(image3d)
-                figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random, is_training=(stage=='train'))
-                
-                volume_ct_interp = self.noise_scheduler.add_noise(image3d, volume_ct_latent, timesteps=timesteps)
-                figure_ct_interp = self.forward_screen(image3d=volume_ct_interp, cameras=view_random, is_training=(stage=='train'))
-                
-                # volume_ct_output = self.forward_volume(
-                #     image2d=figure_ct_interp, 
-                #     elev=timesteps.view(view_shape_),
-                #     azim=azim_random.view(view_shape_),
-                #     n_views=[1]
-                # )
-                # figure_ct_output = self.forward_screen(image3d=volume_ct_output, cameras=view_random, is_training=(stage=='train'))
-                
-                
-                # volume_xr_latent = torch.randn_like(image3d)
-                # figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_hidden, is_training=(stage=='train'))
-                figure_xr_latent = torch.randn_like(image2d)
-                figure_xr_interp = self.noise_scheduler.add_noise(image2d, figure_xr_latent, timesteps=timesteps)
-                
-                # volume_xr_output = self.forward_volume(
-                #     image2d=figure_xr_interp, 
-                #     elev=timesteps.view(view_shape_),
-                #     azim=azim_random.view(view_shape_),
-                #     n_views=[1]
-                # )
-                
-                volume_dx_output = self.forward_volume(
-                    image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
-                    elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
-                    azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-                    n_views=[1, 1]
-                )
-                volume_ct_output, volume_xr_output = torch.split(volume_dx_output, batchsz)
-                
-                figure_ct_output = self.forward_screen(image3d=volume_ct_output, cameras=view_random, is_training=(stage=='train'))
-                figure_xr_output = self.forward_screen(image3d=volume_xr_output, cameras=view_hidden, is_training=(stage=='train'))
-                
-                diff_loss = self.l1loss(volume_ct_output, volume_ct_latent) \
-                        + self.l1loss(figure_ct_output, figure_ct_latent) \
-                        + self.l1loss(figure_xr_output, figure_xr_latent) 
-                # # Sample noise that we shall add to the images
-                # volume_ct_latent = torch.randn_like(image3d)
-                # volume_xr_latent = torch.randn_like(image3d)
-                # volume_dx_latent = torch.cat([volume_ct_latent, volume_xr_latent])
-                # figure_dx_latent = self.forward_screen(image3d=volume_dx_latent, cameras=camera_dx_concat, is_training=(stage=='train'))
-                
-                # # figure_ct_latent = torch.randn_like(image2d)
-                # # figure_xr_latent = torch.randn_like(image2d)
-                # # figure_dx_latent = torch.cat([figure_ct_latent, figure_xr_latent])
-                # figure_ct_latent, figure_xr_latent = torch.split(figure_dx_latent, batchsz)
-                
-                # # Add noise to the clean images according to the noise magnitude at each timestep
-                # timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
-                # figure_dx_interp = self.noise_scheduler.add_noise(figure_dx_concat, figure_dx_latent, timesteps)
-                # volume_dx_output = self.forward_volume(
-                #     image2d=figure_dx_interp, #torch.cat([figure_ct_latent, figure_xr_latent]),
-                #     elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
-                #     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-                #     n_views=[1, 1]
-                # )
-                # figure_dx_output = self.forward_screen(image3d=volume_dx_output, cameras=camera_dx_concat, is_training=(stage=='train'))
-                # figure_ct_output, figure_xr_output = torch.split(figure_dx_output, batchsz)
-                
-                # diff_loss = self.l1loss(volume_dx_output, volume_dx_latent) + self.l1loss(figure_dx_output, figure_dx_latent)
-                self.log(f'{stage}_diff_loss', diff_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-                
-                loss = diff_loss
-            else:
-                # Additionally estimate the volume
-                volume_dx_second = self.forward_volume(
-                    image2d=figure_dx_concat,
-                    elev=torch.cat([timezeros.view(view_shape_), timezeros.view(view_shape_)]),
-                    azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-                    n_views=[1, 1]
-                )
-                figure_dx_second = self.forward_screen(image3d=volume_dx_second, cameras=camera_dx_concat, is_training=(stage=='train'))
-                figure_ct_second, figure_xr_second = torch.split(figure_dx_second, batchsz)
-                
-                volume_ct_second, volume_xr_second = torch.split(volume_dx_second, batchsz)
-                # Perform Post activation like DVGO      
-                volume_ct_second = volume_ct_second.sum(dim=1, keepdim=True)
-                
-                im3d_loss = self.l1loss(volume_ct_second, image3d) 
-                self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-                
-                # im2d_loss = self.l1loss(figure_xr_second, image2d) + self.l1loss(figure_ct_second, figure_ct_random)
-                im2d_loss = self.l1loss(figure_dx_second, figure_dx_concat)
-                self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
-                
-                loss = im3d_loss + im2d_loss
+        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
+        
+        volume_ct_latent = torch.randn_like(image3d)
+        figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random, is_training=(stage=='train'))
+        
+        volume_ct_interp = self.noise_scheduler.add_noise(image3d, volume_ct_latent, timesteps=timesteps)
+        figure_ct_interp = self.forward_screen(image3d=volume_ct_interp, cameras=view_random, is_training=(stage=='train'))
+        
+        # volume_xr_latent = torch.randn_like(image3d)
+        # figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_hidden, is_training=(stage=='train'))
+        figure_xr_latent = torch.randn_like(image2d)
+        figure_xr_interp = self.noise_scheduler.add_noise(image2d, figure_xr_latent, timesteps=timesteps)
+        
+        volume_dx_output = self.forward_volume(
+            image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
+            elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
+            azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+            n_views=[1, 1]
+        )
+        volume_ct_output, volume_xr_output = torch.split(volume_dx_output, batchsz)
+        
+        figure_ct_output = self.forward_screen(image3d=volume_ct_output, cameras=view_random, is_training=(stage=='train'))
+        figure_xr_output = self.forward_screen(image3d=volume_xr_output, cameras=view_hidden, is_training=(stage=='train'))
+        
+        diff_loss = self.l1loss(volume_ct_output, volume_ct_latent) \
+                  + self.l1loss(figure_ct_output, figure_ct_latent) \
+                  + self.l1loss(figure_xr_output, figure_xr_latent) 
+        
+        self.log(f'{stage}_diff_loss', diff_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+        
+        loss = diff_loss
+        
         
         # Visualization step 
         if batch_idx==0:
             with torch.no_grad():
                 # figure_output = figure_dx_latent.clone()
-                figure_output=torch.cat([figure_ct_latent.clone(), figure_xr_latent.clone()]),
+                figure_output = torch.cat([figure_ct_latent.clone(), figure_xr_latent.clone()])
                 
                 for t in tqdm(self.noise_scheduler.timesteps):
                     # 1. predict noise model_output
