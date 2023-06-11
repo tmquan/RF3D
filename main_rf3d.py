@@ -23,7 +23,7 @@ from argparse import ArgumentParser
 from tqdm.auto import tqdm
 
 import diffusers
-from diffusers import DDIMScheduler, UNet2DModel
+from diffusers import DDPMScheduler, DDIMScheduler, UNet2DModel
 
 from pytorch3d.renderer.camera_utils import join_cameras_as_batch
 
@@ -56,7 +56,15 @@ class RF3DLightningModule(LightningModule):
         self.clamp_val = hparams.clamp_val
         self.timesteps = hparams.timesteps
         
-        self.noise_scheduler = DDIMScheduler(
+        self.ddpm_noise_scheduler = DDPMScheduler(
+            num_train_timesteps=self.timesteps, 
+            beta_schedule="scaled_linear",
+            beta_start=0.0001,
+            beta_end=0.02,
+            clip_sample=False,
+        )
+                
+        self.ddim_noise_scheduler = DDIMScheduler(
             num_train_timesteps=self.timesteps, 
             beta_schedule="scaled_linear",
             beta_start=0.0001,
@@ -65,7 +73,7 @@ class RF3DLightningModule(LightningModule):
             # steps_offset=20,
         )
         # set step values
-        self.noise_scheduler.set_timesteps(50)
+        self.ddim_noise_scheduler.set_timesteps(50)
         
         self.logsdir = hparams.logsdir
        
@@ -125,6 +133,7 @@ class RF3DLightningModule(LightningModule):
         image2d = batch["image2d"] * 2.0 - 1.0
         batchsz = image2d.shape[0]
         timezeros = torch.Tensor([0]).to(_device)
+        timeones_ = torch.Tensor([1]).to(_device)
             
         # Construct the random cameras, -1 and 1 are the same point in azimuths
         dist_random = 10.0 * torch.ones(self.batch_size, device=_device)
@@ -145,19 +154,19 @@ class RF3DLightningModule(LightningModule):
         
         view_shape_ = [self.batch_size, 1] 
             
-        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
+        timesteps = torch.randint(0, self.ddim_noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
         
         if batch_idx%2==0:
             volume_ct_latent = torch.randn_like(image3d)
             figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random, is_training=(stage=='train'))
             
-            volume_ct_interp = self.noise_scheduler.add_noise(image3d, volume_ct_latent, timesteps=timesteps)
+            volume_ct_interp = self.ddim_noise_scheduler.add_noise(image3d, volume_ct_latent, timesteps=timesteps)
             figure_ct_interp = self.forward_screen(image3d=volume_ct_interp, cameras=view_random, is_training=(stage=='train'))
             
             volume_xr_latent = torch.randn_like(image3d)
             figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_hidden, is_training=(stage=='train'))
             # figure_xr_latent = torch.randn_like(image2d)
-            figure_xr_interp = self.noise_scheduler.add_noise(image2d, figure_xr_latent, timesteps=timesteps)
+            figure_xr_interp = self.ddim_noise_scheduler.add_noise(image2d, figure_xr_latent, timesteps=timesteps)
             
             volume_dx_output = self.forward_volume(
                 image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
@@ -180,24 +189,59 @@ class RF3DLightningModule(LightningModule):
             loss = diff_loss
         else:
             # Additionally estimate the volume
-            volume_dx_second = self.forward_volume(
-                image2d=figure_dx_concat,
-                elev=torch.cat([timezeros.view(view_shape_), timezeros.view(view_shape_)]),
+            # volume_dx_second = self.forward_volume(
+            #     image2d=figure_dx_concat,
+            #     elev=torch.cat([timezeros.view(view_shape_), timezeros.view(view_shape_)]),
+            #     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+            #     n_views=[1, 1]
+            # )
+            # figure_dx_second = self.forward_screen(image3d=volume_dx_second, cameras=camera_dx_concat, is_training=(stage=='train'))
+            # figure_ct_second, figure_xr_second = torch.split(figure_dx_second, batchsz)
+            
+            # volume_ct_second, volume_xr_second = torch.split(volume_dx_second, batchsz)
+            # # Perform Post activation like DVGO      
+            # volume_ct_second = volume_ct_second.sum(dim=1, keepdim=True)
+            # figure_output = figure_dx_concat
+            
+            # #
+            # tensor_output = self.forward_volume(
+            #     image2d=figure_dx_concat, #torch.cat([figure_ct_latent, figure_xr_latent]),
+            #     elev=torch.cat([timeones_.view(view_shape_), timeones_.view(view_shape_)]).to(_device),
+            #     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+            #     n_views=[1, 1]
+            # )
+            # # Perform Post activation like DVGO      
+            # tensor_output = tensor_output.sum(dim=1, keepdim=True)
+            
+            # # 2. compute previous image: x_t -> x_t-1
+            # volume_output = self.ddpm_noise_scheduler.step(tensor_output, 
+            #                                                timeones_, 
+            #                                                volume_output, 
+            #                                                eta=0,
+            #                                                use_clipped_model_output=False,
+            #                                                generator=None).prev_sample
+            
+            volume_output = self.forward_volume(
+                image2d=figure_dx_concat, #torch.cat([figure_ct_latent, figure_xr_latent]),
+                elev=torch.cat([timezeros.view(view_shape_), timezeros.view(view_shape_)]).to(_device),
                 azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
                 n_views=[1, 1]
             )
-            figure_dx_second = self.forward_screen(image3d=volume_dx_second, cameras=camera_dx_concat, is_training=(stage=='train'))
-            figure_ct_second, figure_xr_second = torch.split(figure_dx_second, batchsz)
+            figure_output = self.forward_screen(image3d=volume_output, cameras=camera_dx_concat, is_training=(stage=='train'))
             
-            volume_ct_second, volume_xr_second = torch.split(volume_dx_second, batchsz)
             # Perform Post activation like DVGO      
-            volume_ct_second = volume_ct_second.sum(dim=1, keepdim=True)
+            volume_output = volume_output.sum(dim=1, keepdim=True)
+                
+            figure_ct_second, figure_xr_second = torch.split(figure_output, batchsz)
+            volume_ct_second, volume_xr_second = torch.split(volume_output, batchsz)
+            
             
             im3d_loss = self.l1loss(volume_ct_second, image3d) 
             self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
-            # im2d_loss = self.l1loss(figure_xr_second, image2d) + self.l1loss(figure_ct_second, figure_ct_random)
-            im2d_loss = self.l1loss(figure_dx_second, figure_dx_concat)
+            im2d_loss = self.l1loss(figure_xr_second, figure_xr_hidden) \
+                      + self.l1loss(figure_ct_second, figure_ct_random)
+            # im2d_loss = self.l1loss(figure_output, figure_dx_concat)
             self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             loss = im3d_loss + im2d_loss
@@ -209,11 +253,11 @@ class RF3DLightningModule(LightningModule):
                 volume_output = torch.cat([volume_ct_latent.clone(), volume_xr_latent.clone()])
                 figure_output = torch.cat([figure_ct_latent.clone(), figure_xr_latent.clone()])
                 
-                for t in tqdm(self.noise_scheduler.timesteps):
+                for t in tqdm(self.ddim_noise_scheduler.timesteps):
                     # 1. predict noise model_output
                     tensor_output = self.forward_volume(
                         image2d=figure_output, #torch.cat([figure_ct_latent, figure_xr_latent]),
-                        elev=torch.cat([t.view(view_shape_), t.view(view_shape_)]).to(figure_output.device),
+                        elev=torch.cat([t.view(view_shape_), t.view(view_shape_)]).to(_device),
                         azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
                         n_views=[1, 1]
                     )
@@ -221,12 +265,12 @@ class RF3DLightningModule(LightningModule):
                     tensor_output = tensor_output.sum(dim=1, keepdim=True)
                     
                     # 2. compute previous image: x_t -> x_t-1
-                    volume_output = self.noise_scheduler.step(tensor_output, 
-                                                              t, 
-                                                              volume_output, 
-                                                              eta=0,
-                                                              use_clipped_model_output=False,
-                                                              generator=None).prev_sample
+                    volume_output = self.ddim_noise_scheduler.step(tensor_output, 
+                                                                   t, 
+                                                                   volume_output, 
+                                                                   eta=0,
+                                                                   use_clipped_model_output=False,
+                                                                   generator=None).prev_sample
                     figure_output = self.forward_screen(image3d=volume_output, cameras=camera_dx_concat, is_training=(stage=='train'))
                     
 
