@@ -212,8 +212,6 @@ class RF3DLightningModule(LightningModule):
                     volume_output = self.ddpm_noise_scheduler.step(tensor_output, 
                                                                    t, 
                                                                    volume_output, 
-                                                                   eta=0,
-                                                                   use_clipped_model_output=False,
                                                                    generator=None).prev_sample
                     figure_output = self.forward_screen(image3d=volume_output, cameras=camera_dx_concat, is_training=(stage=='train'))
                     
