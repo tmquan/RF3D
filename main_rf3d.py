@@ -189,38 +189,6 @@ class RF3DLightningModule(LightningModule):
             loss = diff_loss
         else:
             # Additionally estimate the volume
-            # volume_dx_second = self.forward_volume(
-            #     image2d=figure_dx_concat,
-            #     elev=torch.cat([timezeros.view(view_shape_), timezeros.view(view_shape_)]),
-            #     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-            #     n_views=[1, 1]
-            # )
-            # figure_dx_second = self.forward_screen(image3d=volume_dx_second, cameras=camera_dx_concat, is_training=(stage=='train'))
-            # figure_ct_second, figure_xr_second = torch.split(figure_dx_second, batchsz)
-            
-            # volume_ct_second, volume_xr_second = torch.split(volume_dx_second, batchsz)
-            # # Perform Post activation like DVGO      
-            # volume_ct_second = volume_ct_second.sum(dim=1, keepdim=True)
-            # figure_output = figure_dx_concat
-            
-            # #
-            # tensor_output = self.forward_volume(
-            #     image2d=figure_dx_concat, #torch.cat([figure_ct_latent, figure_xr_latent]),
-            #     elev=torch.cat([timeones_.view(view_shape_), timeones_.view(view_shape_)]).to(_device),
-            #     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-            #     n_views=[1, 1]
-            # )
-            # # Perform Post activation like DVGO      
-            # tensor_output = tensor_output.sum(dim=1, keepdim=True)
-            
-            # # 2. compute previous image: x_t -> x_t-1
-            # volume_output = self.ddpm_noise_scheduler.step(tensor_output, 
-            #                                                timeones_, 
-            #                                                volume_output, 
-            #                                                eta=0,
-            #                                                use_clipped_model_output=False,
-            #                                                generator=None).prev_sample
-            
             volume_output = self.forward_volume(
                 image2d=figure_dx_concat, #torch.cat([figure_ct_latent, figure_xr_latent]),
                 elev=torch.cat([timezeros.view(view_shape_), timezeros.view(view_shape_)]).to(_device),
@@ -276,18 +244,10 @@ class RF3DLightningModule(LightningModule):
 
                     
                 gen_figure_ct_random, gen_figure_xr_hidden = torch.split(figure_output, batchsz)
-                
                 gen_volume_ct_random, gen_volume_xr_hidden = torch.split(volume_output, batchsz)
                 
                 figure_dx_zeros_ = torch.zeros_like(image2d)
-                # gen2d = torch.cat([
-                #     torch.cat([figure_ct_latent, gen_figure_ct_random, figure_xr_latent, gen_figure_xr_hidden], dim=-2).transpose(2, 3),
-                #     torch.cat([image3d[..., self.vol_shape//2, :], 
-                #                gen_volume_ct_random[..., self.vol_shape//2, :], 
-                #                figure_dx_zeros_, 
-                #                gen_volume_xr_hidden[..., self.vol_shape//2, :] ], dim=-2).transpose(2, 3),
-                    
-                # ], dim=-2)
+               
                 gen2d = torch.cat([
                     torch.cat([figure_ct_random, figure_ct_latent, figure_ct_interp, gen_figure_ct_random], dim=-2).transpose(2, 3),
                     torch.cat([figure_xr_hidden, figure_xr_latent, figure_xr_interp, gen_figure_xr_hidden], dim=-2).transpose(2, 3),
