@@ -206,11 +206,11 @@ class RF3DLightningModule(LightningModule):
             diff_loss = self.l1loss(volume_ct_output, image3d)          \
                       + self.l1loss(figure_ct_output, figure_ct_random) \
                       + self.l1loss(figure_xr_output, figure_xr_hidden) 
-            alpha_t = _extract_into_tensor(
-                self.ddim_noise_scheduler.alphas_cumprod, timesteps, (figure_dx_concat.shape[0], 1, 1, 1)
-            )
-            snr_weights = alpha_t / (1 - alpha_t)
-            diff_loss = diff_loss * snr_weights
+            # alpha_t = _extract_into_tensor(
+            #     self.ddim_noise_scheduler.alphas_cumprod.to(_device), timesteps, (figure_dx_concat.shape[0], 1, 1, 1)
+            # )
+            # snr_weights = alpha_t / (1 - alpha_t)
+            # diff_loss = diff_loss * snr_weights
         self.log(f'{stage}_diff_loss', diff_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
         
         loss = diff_loss
