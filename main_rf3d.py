@@ -204,13 +204,15 @@ class RF3DLightningModule(LightningModule):
                       + self.l1loss(figure_ct_output, figure_ct_latent) \
                       + self.l1loss(figure_xr_output, figure_xr_latent) 
         elif self.ddim_noise_scheduler.prediction_type=="sample": 
-            im3d_loss = self.l1loss(volume_ct_output.sum(dim=1, keepdim=True), image3d) 
-            self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+            im3d_loss_ct = self.l1loss(volume_ct_output.sum(dim=1, keepdim=True), image3d) 
+            self.log(f'{stage}_im3d_loss_ct', im3d_loss_ct, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
-            im2d_loss = self.l1loss(figure_dx_output, figure_dx_concat)
-            self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+            im2d_loss_ct = self.l1loss(figure_ct_output, figure_ct_random) 
+            im2d_loss_xr = self.l1loss(figure_xr_output, image2d) 
+            self.log(f'{stage}_im2d_loss_ct', im2d_loss_ct, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
+            self.log(f'{stage}_im2d_loss_xr', im2d_loss_xr, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
-            loss = self.alpha*im3d_loss + self.gamma*im2d_loss
+            loss = self.alpha*im3d_loss_ct + self.gamma*im2d_loss_ct + self.omega*im2d_loss_xr
         
         # Visualization step 
         if batch_idx==0:
