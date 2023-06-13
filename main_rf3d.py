@@ -90,6 +90,8 @@ class RF3DLightningModule(LightningModule):
             prediction_type="sample", # or "epsilon"
             # steps_offset=20,
         )
+        self.ddim_noise_scheduler.set_timesteps(50)
+        
         self.logsdir = hparams.logsdir
        
         self.sh = hparams.sh
@@ -168,12 +170,9 @@ class RF3DLightningModule(LightningModule):
         camera_dx_concat = join_cameras_as_batch([view_random, view_hidden])
         
         view_shape_ = [self.batch_size, 1] 
-        # set step values
-        self.ddim_noise_scheduler.set_timesteps(self.timesteps)
-        timesteps = torch.randint(0, self.ddim_noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
         
-        # if batch_idx%10==9:
-        #     timesteps = timeones_
+        # Diffusion step
+        timesteps = torch.randint(0, self.ddim_noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
             
         volume_ct_latent = torch.randn_like(image3d)
         figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random, is_training=(stage=='train'))
@@ -216,7 +215,6 @@ class RF3DLightningModule(LightningModule):
         # Visualization step 
         if batch_idx==0:
             with torch.no_grad():
-                self.ddim_noise_scheduler.set_timesteps(50)
                 volume_output = torch.cat([volume_ct_latent.clone(), volume_xr_latent.clone()])
                 figure_output = torch.cat([figure_ct_latent.clone(), figure_xr_latent.clone()])
                 
@@ -239,8 +237,6 @@ class RF3DLightningModule(LightningModule):
                                                                    use_clipped_model_output=False,
                                                                    generator=None).prev_sample
                     figure_output = self.forward_screen(image3d=volume_output, cameras=camera_dx_concat, is_training=(stage=='train'))
-                    
-
                     
                 gen_figure_ct_random, gen_figure_xr_hidden = torch.split(figure_output, batchsz)
                 gen_volume_ct_random, gen_volume_xr_hidden = torch.split(volume_output, batchsz)
