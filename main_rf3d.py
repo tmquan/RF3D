@@ -217,10 +217,10 @@ class RF3DLightningModule(LightningModule):
                     n_views=[1]
                 )    
         
-        figure_dx_output = self.forward_screen(image3d=volume_dx_output, cameras=camera_dx_concat, is_training=(stage=='train'))
-        figure_ct_output, figure_xr_output = torch.split(figure_dx_output, batchsz)
-        # figure_ct_output = self.forward_screen(image3d=volume_ct_output, cameras=view_random, is_training=(stage=='train'))
-        # figure_xr_output = self.forward_screen(image3d=volume_xr_output, cameras=view_hidden, is_training=(stage=='train'))
+        # figure_dx_output = self.forward_screen(image3d=volume_dx_output, cameras=camera_dx_concat, is_training=(stage=='train'))
+        # figure_ct_output, figure_xr_output = torch.split(figure_dx_output, batchsz)
+        figure_ct_output = self.forward_screen(image3d=volume_ct_output, cameras=view_random, is_training=(stage=='train'))
+        figure_xr_output = self.forward_screen(image3d=volume_xr_output, cameras=view_hidden, is_training=(stage=='train'))
         
         if self.ddim_noise_scheduler.prediction_type=="epsilon":
             diff_loss = self.l1loss(volume_ct_output, volume_ct_latent) \
