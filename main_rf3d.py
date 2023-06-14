@@ -185,13 +185,37 @@ class RF3DLightningModule(LightningModule):
         # figure_xr_latent = torch.randn_like(image2d)
         figure_xr_interp = self.ddim_noise_scheduler.add_noise(image2d, figure_xr_latent, timesteps=timesteps)
         
-        volume_dx_output = self.forward_volume(
-            image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
-            elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
-            azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-            n_views=[1, 1]
-        )
-        volume_ct_output, volume_xr_output = torch.split(volume_dx_output, batchsz)
+        # volume_dx_output = self.forward_volume(
+        #     image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
+        #     elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
+        #     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+        #     n_views=[1, 1]
+        # )
+        # volume_ct_output, volume_xr_output = torch.split(volume_dx_output, batchsz)
+        
+        
+        if self.img:
+            volume_dx_output = self.forward_volume(
+                image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
+                elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
+                azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+                n_views=[1, 1]
+            )
+            volume_ct_output, volume_xr_output = torch.split(volume_dx_output, batchsz)     
+        else:
+            volume_ct_output = self.forward_volume(
+                image2d=figure_ct_interp, 
+                elev=timesteps.view(view_shape_), 
+                azim=azim_random.view(view_shape_), 
+                n_views=[1]
+            )
+            with torch.no_grad():
+                volume_xr_output = self.forward_volume(
+                    image2d=figure_xr_interp, 
+                    elev=timesteps.view(view_shape_), 
+                    azim=azim_hidden.view(view_shape_), 
+                    n_views=[1]
+                )    
         
         figure_dx_output = self.forward_screen(image3d=volume_dx_output, cameras=camera_dx_concat, is_training=(stage=='train'))
         figure_ct_output, figure_xr_output = torch.split(figure_dx_output, batchsz)
