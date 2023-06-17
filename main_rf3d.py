@@ -296,28 +296,23 @@ class RF3DLightningModule(LightningModule):
                 volume_ct_second, volume_xr_second = torch.split(volume_output, batchsz)
             
                 gen2d = torch.cat([
-                    torch.cat([figure_ct_random, 
-                               figure_ct_latent, 
-                               figure_ct_interp, 
-                               gen_figure_ct_random, 
+                    torch.cat([image3d[..., self.vol_shape//2, :],
+                               figure_ct_random, figure_ct_latent, figure_ct_interp, 
                                volume_ct_second[..., self.vol_shape//2, :],
                                figure_ct_second, 
                                ], dim=-2).transpose(2, 3),
-                    torch.cat([figure_xr_hidden, 
-                               figure_xr_latent, 
-                               figure_xr_interp, 
-                               gen_figure_xr_hidden, 
-                               volume_xr_second[..., self.vol_shape//2, :], 
+                    torch.cat([volume_xr_nograd[..., self.vol_shape//2, :],
+                               figure_xr_random, figure_xr_latent, figure_xr_interp, 
+                               volume_xr_second[..., self.vol_shape//2, :],
                                figure_xr_second, 
                                ], dim=-2).transpose(2, 3),
-                    torch.cat([image3d[..., self.vol_shape//2, :], 
-                               volume_ct_latent[..., self.vol_shape//2, :], 
-                               volume_ct_interp[..., self.vol_shape//2, :],  
-                               gen_volume_ct_random[..., self.vol_shape//2, :],
-                               gen_volume_xr_hidden[..., self.vol_shape//2, :],
-                               figure_dx_zeros_,
-                               ], dim=-2).transpose(2, 3),
-                    
+                    torch.cat([output_ct_random,
+                               output_ct_hidden, 
+                               output_xr_random,
+                               output_xr_hidden, 
+                               gen_figure_ct_random, 
+                               gen_figure_xr_hidden,
+                               ], dim=-2).transpose(2, 3),                    
                 ], dim=-2)
                 tensorboard = self.logger.experiment
                 grid2d = torchvision.utils.make_grid(gen2d, normalize=False, scale_each=False, nrow=1, padding=0).clamp(-1., 1.) * 0.5 + 0.5
