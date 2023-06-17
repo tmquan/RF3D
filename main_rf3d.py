@@ -202,7 +202,9 @@ class RF3DLightningModule(LightningModule):
                 image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
                 elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
                 azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-                n_views=[1, 1]
+                n_views=[1, 1],
+                resample_clarity=False, 
+                resample_volumes=True
             )
         else:
             volume_ct_latent = torch.randn_like(image3d)
@@ -219,7 +221,9 @@ class RF3DLightningModule(LightningModule):
                 image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
                 elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
                 azim=torch.cat([azim_hidden.view(view_shape_), azim_random.view(view_shape_)]),
-                n_views=[1, 1]
+                n_views=[1, 1],
+                resample_clarity=False, 
+                resample_volumes=True
             )
             
         output_ct_volume, output_xr_volume = torch.split(output_dx_volume, batchsz)    
@@ -302,15 +306,15 @@ class RF3DLightningModule(LightningModule):
                                figure_ct_second
                                ], dim=-2).transpose(2, 3),
                     torch.cat([volume_xr_nograd.mean(dim=1, keepdim=True)[..., self.vol_shape//2, :],
-                               figure_xr_random, figure_xr_latent, figure_xr_interp, 
+                               figure_xr_hidden, figure_xr_latent, figure_xr_interp, 
                                volume_xr_second[..., self.vol_shape//2, :],
                                figure_xr_second 
                                ], dim=-2).transpose(2, 3),
                     torch.cat([output_ct_random,
                                output_ct_hidden, 
+                               gen_figure_ct_random, 
                                output_xr_random,
                                output_xr_hidden, 
-                               gen_figure_ct_random, 
                                gen_figure_xr_hidden,
                                ], dim=-2).transpose(2, 3),                    
                 ], dim=-2)
