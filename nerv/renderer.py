@@ -249,63 +249,38 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             max_depth=4.0,
         )        
         
-    def forward(self, figures, elev, azim, n_views=[2, 1]):
-        clarity = self.clarity_net(
-            figures, timestep=elev, class_labels=azim).sample.view(-1, 1, self.n_pts_per_ray, self.img_shape, self.img_shape)
+    def forward(self, figures, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False):
         _device = figures.device
         B = figures.shape[0]
         assert B==sum(n_views) # batch must be equal to number of projections
+        clarity = self.clarity_net(
+            figures, timestep=elev, class_labels=azim).sample.view(-1, 1, self.n_pts_per_ray, self.img_shape, self.img_shape)
 
-        # # Split the clarity according to the n_views
-        # scenes = torch.split(clarity, split_size_or_sections=n_views, dim=0) # 31SHW = [21SHW, 11SHW]
-        # eleves = torch.split(elev, split_size_or_sections=n_views, dim=0)
-        # azimes = torch.split(azim, split_size_or_sections=n_views, dim=0)
-        
-        # interp = []
-        # z = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
-        # y = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
-        # x = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
-        # for scene_, elev_, azim_, n_view in zip(scenes, eleves, azimes, n_views):
-        #     coords = torch.stack(torch.meshgrid(x, y, z), dim=-1).view(-1, 3).unsqueeze(0).repeat(n_view, 1, 1) # 1 DHW 3 to n_view DHW 3
-        #     # Process (resample) the clarity from ray views to ndc
-        #     dist_ = 10.0 * torch.ones(n_view, device=_device)
-        #     camera_ = make_cameras_dea(dist_, elev_, azim_)
+        if resample_clarity:
+            z = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
+            y = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
+            x = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
+            coords = torch.stack(torch.meshgrid(x, y, z), dim=-1).view(-1, 3).unsqueeze(0).repeat(B, 1, 1) # 1 DHW 3 to B DHW 3
+            # Process (resample) the clarity from ray views to ndc
+            dist = 10.0 * torch.ones(B, device=_device)
+            cameras = make_cameras_dea(dist, elev, azim)
             
-        #     points = camera_.transform_points_ndc(coords) # world to ndc, 1 DHW 3
-        #     values = F.grid_sample(
-        #         scene_,
-        #         points.view(-1, self.vol_shape, self.vol_shape, self.vol_shape, 3),
-        #         mode='bilinear', 
-        #         padding_mode='zeros', 
-        #         align_corners=False
-        #     )
-        #     values = values.mean(dim=0, keepdim=True)
-        #     interp.append(values)
-        
-        z = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
-        y = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
-        x = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
-        coords = torch.stack(torch.meshgrid(x, y, z), dim=-1).view(-1, 3).unsqueeze(0).repeat(B, 1, 1) # 1 DHW 3 to B DHW 3
-        # Process (resample) the clarity from ray views to ndc
-        dist = 10.0 * torch.ones(B, device=_device)
-        cameras = make_cameras_dea(dist, elev, azim)
-        
-        points = cameras.transform_points_ndc(coords) # world to ndc, 1 DHW 3
-        values = F.grid_sample(
-            clarity,
-            points.view(-1, self.vol_shape, self.vol_shape, self.vol_shape, 3),
-            mode='bilinear', 
-            padding_mode='zeros', 
-            align_corners=False
-        )
-        
-        scenes = torch.split(values, split_size_or_sections=n_views, dim=0) # 31SHW = [21SHW, 11SHW]
-        interp = []
-        for scene_, n_view in zip(scenes, n_views):
-            value_ = scene_.mean(dim=0, keepdim=True)
-            interp.append(value_)
+            points = cameras.transform_points_ndc(coords) # world to ndc, 1 DHW 3
+            values = F.grid_sample(
+                clarity,
+                points.view(-1, self.vol_shape, self.vol_shape, self.vol_shape, 3),
+                mode='bilinear', 
+                padding_mode='zeros', 
+                align_corners=False
+            )
             
-        clarity = torch.cat(interp, dim=0)
+            scenes = torch.split(values, split_size_or_sections=n_views, dim=0) # 31SHW = [21SHW, 11SHW]
+            interp = []
+            for scene_, n_view in zip(scenes, n_views):
+                value_ = scene_.mean(dim=0, keepdim=True)
+                interp.append(value_)
+                
+            clarity = torch.cat(interp, dim=0)
 
         if self.pe > 0:
             density = self.density_net(torch.cat([self.pebasis.repeat(clarity.shape[0], 1, 1, 1, 1), clarity], dim=1))
@@ -325,4 +300,31 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             volume = shcomps[[idx]].repeat(n_view, 1, 1, 1, 1)
             volumes.append(volume)
         volumes = torch.cat(volumes, dim=0)
+        
+        if resample_volumes:
+            z = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
+            y = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
+            x = torch.linspace(-1.5, 1.5, steps=self.vol_shape, device=_device)
+            coords = torch.stack(torch.meshgrid(x, y, z), dim=-1).view(-1, 3).unsqueeze(0).repeat(B, 1, 1) # 1 DHW 3 to B DHW 3
+            # Process (resample) the clarity from ray views to ndc
+            dist = 10.0 * torch.ones(B, device=_device)
+            cameras = make_cameras_dea(dist, elev, azim)
+            
+            points = cameras.transform_points_ndc(coords) # world to ndc, 1 DHW 3
+            values = F.grid_sample(
+                volumes,
+                points.view(-1, self.vol_shape, self.vol_shape, self.vol_shape, 3),
+                mode='bilinear', 
+                padding_mode='zeros', 
+                align_corners=False
+            )
+            
+            scenes = torch.split(values, split_size_or_sections=n_views, dim=0) # 31SHW = [21SHW, 11SHW]
+            interp = []
+            for scene_, n_view in zip(scenes, n_views):
+                value_ = scene_.mean(dim=0, keepdim=True)
+                interp.append(value_)
+                
+            volumes = torch.cat(interp, dim=0)
+        
         return volumes
