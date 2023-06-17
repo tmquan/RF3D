@@ -303,19 +303,22 @@ class RF3DLightningModule(LightningModule):
                     torch.cat([image3d[..., self.vol_shape//2, :],
                                figure_ct_random, figure_ct_latent, figure_ct_interp, 
                                volume_ct_second[..., self.vol_shape//2, :],
-                               figure_ct_second
+                               figure_ct_second, 
+                               gen_volume_ct_random[..., self.vol_shape//2, :],
                                ], dim=-2).transpose(2, 3),
                     torch.cat([volume_xr_nograd.mean(dim=1, keepdim=True)[..., self.vol_shape//2, :],
                                figure_xr_hidden, figure_xr_latent, figure_xr_interp, 
                                volume_xr_second[..., self.vol_shape//2, :],
-                               figure_xr_second 
+                               figure_xr_second,
+                               gen_volume_xr_hidden[..., self.vol_shape//2, :], 
                                ], dim=-2).transpose(2, 3),
                     torch.cat([output_ct_random,
                                output_ct_hidden, 
                                gen_figure_ct_random, 
                                output_xr_random,
                                output_xr_hidden, 
-                               gen_figure_xr_hidden,
+                               gen_figure_xr_hidden, 
+                               figure_dx_zeros_
                                ], dim=-2).transpose(2, 3),                    
                 ], dim=-2)
                 tensorboard = self.logger.experiment
