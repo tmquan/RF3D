@@ -312,7 +312,7 @@ class RF3DLightningModule(LightningModule):
                                output_ct_hidden, 
                                output_xr_random,
                                output_xr_hidden, 
-                               figure_dx_zeros_
+                               figure_dx_zeros_,
                                gen_figure_ct_random, 
                                gen_figure_xr_hidden, 
                                ], dim=-2).transpose(2, 3),                    
