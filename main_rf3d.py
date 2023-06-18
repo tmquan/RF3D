@@ -306,7 +306,7 @@ class RF3DLightningModule(LightningModule):
                                figure_ct_second, 
                                gen_volume_ct_random[..., self.vol_shape//2, :],
                                ], dim=-2).transpose(2, 3),
-                    torch.cat([volume_xr_nograd.mean(dim=1, keepdim=True)[..., self.vol_shape//2, :],
+                    torch.cat([volume_xr_nograd.sum(dim=1, keepdim=True)[..., self.vol_shape//2, :],
                                figure_xr_hidden, figure_xr_latent, figure_xr_interp, 
                                volume_xr_second[..., self.vol_shape//2, :],
                                figure_xr_second,
