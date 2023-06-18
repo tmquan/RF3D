@@ -171,8 +171,8 @@ class RF3DLightningModule(LightningModule):
             elev=timezeros.view(view_shape_), 
             azim=azim_hidden.view(view_shape_), 
             n_views=[1], 
-            resample_clarity=False, 
-            resample_volumes=True
+            resample_clarity=True, 
+            resample_volumes=False
         ).detach()
                 
         # Construct the samples in 2D
@@ -203,8 +203,8 @@ class RF3DLightningModule(LightningModule):
                 elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
                 azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
                 n_views=[1, 1],
-                resample_clarity=False, 
-                resample_volumes=True
+                resample_clarity=True, 
+                resample_volumes=False
             )
         else:
             volume_ct_latent = torch.randn_like(image3d)
@@ -222,8 +222,8 @@ class RF3DLightningModule(LightningModule):
                 elev=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
                 azim=torch.cat([azim_hidden.view(view_shape_), azim_random.view(view_shape_)]),
                 n_views=[1, 1],
-                resample_clarity=False, 
-                resample_volumes=True
+                resample_clarity=True, 
+                resample_volumes=False
             )
             
         output_ct_volume, output_xr_volume = torch.split(output_dx_volume, batchsz)    
