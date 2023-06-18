@@ -72,7 +72,10 @@ def inverse_look_at_view_transform(R, T, degrees=True):
 def make_cameras_dea(
     dist: torch.Tensor, 
     elev: torch.Tensor, 
-    azim: torch.Tensor
+    azim: torch.Tensor, 
+    fov: int=10, 
+    znear: int=18.0, 
+    zfar: int=22.0
     ):
     assert dist.device == elev.device == azim.device
     _device = dist.device
@@ -81,7 +84,7 @@ def make_cameras_dea(
         elev=elev.float() * 90, 
         azim=azim.float() * 180
     )
-    return FoVPerspectiveCameras(R=R, T=T, fov=16, znear=8.0, zfar=12.0).to(_device)
+    return FoVPerspectiveCameras(R=R, T=T, fov=fov, znear=znear, zfar=zfar).to(_device)
 
 def make_cameras_RT(
     R: torch.Tensor, 
