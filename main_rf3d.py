@@ -310,11 +310,11 @@ class RF3DLightningModule(LightningModule):
                                ], dim=-2).transpose(2, 3),
                     torch.cat([output_ct_random,
                                output_ct_hidden, 
-                               gen_figure_ct_random, 
                                output_xr_random,
                                output_xr_hidden, 
-                               gen_figure_xr_hidden, 
                                figure_dx_zeros_
+                               gen_figure_ct_random, 
+                               gen_figure_xr_hidden, 
                                ], dim=-2).transpose(2, 3),                    
                 ], dim=-2)
                 tensorboard = self.logger.experiment
