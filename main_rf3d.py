@@ -180,9 +180,6 @@ class RF3DLightningModule(LightningModule):
         figure_ct_hidden = self.forward_screen(image3d=image3d, cameras=view_hidden)
         figure_xr_random = self.forward_screen(image3d=volume_xr_nograd, cameras=view_random) 
         figure_xr_hidden = image2d 
-        figure_dx_concat = torch.cat([figure_ct_hidden, figure_xr_hidden])
-        camera_dx_concat = join_cameras_as_batch([view_hidden, view_hidden])
-        
         
         # Diffusion step
         timesteps = torch.randint(0, self.ddim_noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
@@ -274,7 +271,8 @@ class RF3DLightningModule(LightningModule):
                                                                    eta=0,
                                                                    use_clipped_model_output=False,
                                                                    generator=None).prev_sample
-                    figure_output = self.forward_screen(image3d=volume_output, cameras=camera_dx_concat)
+                    figure_output = self.forward_screen(image3d=volume_output, 
+                                                        cameras=join_cameras_as_batch([view_random, view_hidden]))
                     
                 gen_figure_ct_random, gen_figure_xr_hidden = torch.split(figure_output, batchsz)
                 gen_volume_ct_random, gen_volume_xr_hidden = torch.split(volume_output, batchsz)
@@ -283,12 +281,13 @@ class RF3DLightningModule(LightningModule):
 
                 # Additionally estimate the volume
                 volume_output = self.forward_volume(
-                    image2d=figure_dx_concat, #torch.cat([figure_ct_latent, figure_xr_latent]),
+                    image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
                     elev=torch.cat([timezeros.view(view_shape_), timezeros.view(view_shape_)]).to(_device),
                     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
                     n_views=[1, 1]
                 )
-                figure_output = self.forward_screen(image3d=volume_output, cameras=camera_dx_concat)
+                figure_output = self.forward_screen(image3d=volume_output, 
+                                                    cameras=join_cameras_as_batch([view_random, view_hidden]))
                 
                 # Perform Post activation like DVGO      
                 volume_output = volume_output.sum(dim=1, keepdim=True)
