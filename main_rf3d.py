@@ -132,7 +132,7 @@ class RF3DLightningModule(LightningModule):
 
         self.train_step_outputs = []
         self.validation_step_outputs = []
-        self.l1loss = nn.L1Loss(reduction="mean")
+        self.loss = nn.MSELoss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):   
         return self.fwd_renderer(image3d * 0.5 + 0.5, cameras) * 2.0 - 1.0
@@ -140,10 +140,6 @@ class RF3DLightningModule(LightningModule):
     def forward_volume(self, image2d, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False): 
         return self.inv_renderer(image2d, elev.squeeze(1), azim.squeeze(1) * 900, n_views, 
                                  resample_clarity=resample_clarity, resample_volumes=resample_volumes) 
-    
-    def add_noise(self, x, noise, amount):
-        amount = amount.view(-1, 1, 1, 1) # Sort shape so broadcasting works
-        return x*(1-amount) + noise*amount 
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -233,20 +229,26 @@ class RF3DLightningModule(LightningModule):
         if self.ddim_noise_scheduler.prediction_type=="epsilon":
             pass
         elif self.ddim_noise_scheduler.prediction_type=="sample": 
-            im3d_loss_ct = self.l1loss(output_ct_volume.sum(dim=1, keepdim=True), image3d) 
-            im3d_loss_xr = self.l1loss(output_xr_volume, volume_xr_nograd) 
+            im3d_loss_ct = self.loss(output_ct_volume.sum(dim=1, keepdim=True), image3d) 
+            im3d_loss_xr = self.loss(output_xr_volume, volume_xr_nograd) 
             im3d_loss = im3d_loss_ct + im3d_loss_xr
             self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
-            im2d_loss_ct_hidden = self.l1loss(output_ct_hidden, figure_ct_hidden) 
-            im2d_loss_xr_hidden = self.l1loss(output_xr_hidden, image2d) 
-            im2d_loss_ct_random = self.l1loss(output_ct_random, figure_ct_random) 
-            im2d_loss_xr_random = self.l1loss(output_xr_random, figure_xr_random) 
+            im2d_loss_ct_hidden = self.loss(output_ct_hidden, figure_ct_hidden) 
+            im2d_loss_xr_hidden = self.loss(output_xr_hidden, image2d) 
+            im2d_loss_ct_random = self.loss(output_ct_random, figure_ct_random) 
+            im2d_loss_xr_random = self.loss(output_xr_random, figure_xr_random) 
             im2d_loss = im2d_loss_ct_hidden + im2d_loss_xr_hidden + im2d_loss_ct_random + im2d_loss_xr_random
             self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             loss = self.alpha*im3d_loss + self.gamma*im2d_loss
-        
+
+            alpha_t = _extract_into_tensor(
+                self.ddim_noise_scheduler.alphas_cumprod.to(_device), timesteps, (image3d.shape[0], 1, 1, 1, 1)
+            )
+            snr_weights = alpha_t / (1 - alpha_t)
+            loss = snr_weights * loss
+                    
         # Visualization step 
         if batch_idx==0:
             with torch.no_grad():
