@@ -111,7 +111,7 @@ class RF3DLightningModule(LightningModule):
             n_pts_per_ray=self.n_pts_per_ray, 
             min_depth=4.0, 
             max_depth=8.0, 
-            ndc_extent=3.0,
+            ndc_extent=4.0,
         )
         
         self.inv_renderer = NeRVFrontToBackInverseRenderer(
