@@ -132,10 +132,10 @@ class RF3DLightningModule(LightningModule):
 
         self.train_step_outputs = []
         self.validation_step_outputs = []
-        self.loss = nn.MSELoss(reduction="mean")
+        self.l1loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):   
-        return self.fwd_renderer(image3d * 0.5 + 0.5, cameras) * 2.0 - 1.0
+        return self.fwd_renderer(image3d * 0.5 + 0.5/image3d.shape[1], cameras) * 2.0 - 1.0
 
     def forward_volume(self, image2d, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False): 
         return self.inv_renderer(image2d, elev.squeeze(1), azim.squeeze(1) * 900, n_views, 
@@ -147,7 +147,7 @@ class RF3DLightningModule(LightningModule):
         image2d = batch["image2d"] * 2.0 - 1.0
         batchsz = image2d.shape[0]
         timezeros = torch.Tensor([0]).to(_device)
-        timeones_ = torch.Tensor([1]).to(_device)
+        timemones = torch.Tensor([-1]).to(_device)
             
         # Construct the random cameras, -1 and 1 are the same point in azimuths
         dist_random = 6.0 * torch.ones(self.batch_size, device=_device)
@@ -164,7 +164,7 @@ class RF3DLightningModule(LightningModule):
         
         volume_xr_nograd = self.forward_volume(
             image2d=image2d, 
-            elev=timezeros.view(view_shape_), 
+            elev=timemones.view(view_shape_), 
             azim=azim_hidden.view(view_shape_), 
             n_views=[1], 
             resample_clarity=True, 
@@ -180,7 +180,7 @@ class RF3DLightningModule(LightningModule):
         # Diffusion step
         timesteps = torch.randint(0, self.ddim_noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
         
-        if batch_idx%2==0:
+        if batch_idx%4==0:
             volume_ct_latent = torch.randn_like(image3d)
             figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random)
             volume_ct_interp = self.ddim_noise_scheduler.add_noise(image3d, volume_ct_latent, timesteps=timesteps)
@@ -199,7 +199,7 @@ class RF3DLightningModule(LightningModule):
                 resample_clarity=True, 
                 resample_volumes=False,
             )
-        else:
+        elif batch_idx%4==1:
             volume_ct_latent = torch.randn_like(image3d)
             figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_hidden)
             volume_ct_interp = self.ddim_noise_scheduler.add_noise(image3d, volume_ct_latent, timesteps=timesteps)
@@ -218,6 +218,15 @@ class RF3DLightningModule(LightningModule):
                 resample_clarity=True, 
                 resample_volumes=False,
             )
+        else:
+            output_dx_volume = self.forward_volume(
+                image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
+                elev=torch.cat([timemones.view(view_shape_), timemones.view(view_shape_)]),
+                azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+                n_views=[1, 1],
+                resample_clarity=True, 
+                resample_volumes=False,
+            )
             
         output_ct_volume, output_xr_volume = torch.split(output_dx_volume, batchsz)    
         
@@ -229,25 +238,27 @@ class RF3DLightningModule(LightningModule):
         if self.ddim_noise_scheduler.prediction_type=="epsilon":
             pass
         elif self.ddim_noise_scheduler.prediction_type=="sample": 
-            im3d_loss_ct = self.loss(output_ct_volume.sum(dim=1, keepdim=True), image3d) 
-            im3d_loss_xr = self.loss(output_xr_volume, volume_xr_nograd) 
-            im3d_loss = im3d_loss_ct + im3d_loss_xr
+            im3d_loss_ct = self.l1loss(output_ct_volume.sum(dim=1, keepdim=True), image3d) 
+            im3d_loss_xr = self.l1loss(output_xr_volume, volume_xr_nograd) 
+            # im3d_loss = im3d_loss_ct + im3d_loss_xr
+            im3d_loss = im3d_loss_ct
             self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
-            im2d_loss_ct_hidden = self.loss(output_ct_hidden, figure_ct_hidden) 
-            im2d_loss_xr_hidden = self.loss(output_xr_hidden, image2d) 
-            im2d_loss_ct_random = self.loss(output_ct_random, figure_ct_random) 
-            im2d_loss_xr_random = self.loss(output_xr_random, figure_xr_random) 
-            im2d_loss = im2d_loss_ct_hidden + im2d_loss_xr_hidden + im2d_loss_ct_random + im2d_loss_xr_random
+            im2d_loss_ct_random = self.l1loss(output_ct_random, figure_ct_random) 
+            im2d_loss_ct_hidden = self.l1loss(output_ct_hidden, figure_ct_hidden) 
+            im2d_loss_xr_random = self.l1loss(output_xr_random, figure_xr_random) 
+            im2d_loss_xr_hidden = self.l1loss(output_xr_hidden, image2d) 
+            # im2d_loss = im2d_loss_ct_random + im2d_loss_ct_hidden + im2d_loss_xr_random + im2d_loss_xr_hidden 
+            im2d_loss = im2d_loss_ct_random + im2d_loss_ct_hidden + im2d_loss_xr_hidden 
             self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             loss = self.alpha*im3d_loss + self.gamma*im2d_loss
 
-            alpha_t = _extract_into_tensor(
-                self.ddim_noise_scheduler.alphas_cumprod.to(_device), timesteps, (image3d.shape[0], 1, 1, 1, 1)
-            )
-            snr_weights = alpha_t / (1 - alpha_t)
-            loss = snr_weights * loss
+            # alpha_t = _extract_into_tensor(
+            #     self.ddim_noise_scheduler.alphas_cumprod.to(_device), timesteps, (image3d.shape[0], 1, 1, 1, 1)
+            # )
+            # snr_weights = alpha_t / (1 - alpha_t)
+            # loss = snr_weights * loss
                     
         # Visualization step 
         if batch_idx==0:
@@ -284,7 +295,7 @@ class RF3DLightningModule(LightningModule):
                 # Additionally estimate the volume
                 volume_output = self.forward_volume(
                     image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
-                    elev=torch.cat([timezeros.view(view_shape_), timezeros.view(view_shape_)]).to(_device),
+                    elev=torch.cat([timemones.view(view_shape_), timemones.view(view_shape_)]).to(_device),
                     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
                     n_views=[1, 1]
                 )

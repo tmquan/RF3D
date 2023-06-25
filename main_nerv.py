@@ -135,7 +135,7 @@ class NeRVLightningModule(LightningModule):
         self.l1loss = nn.L1Loss(reduction="mean")
 
     def forward_screen(self, image3d, cameras):   
-        return self.fwd_renderer(image3d * 0.5 + 0.5, cameras) * 2.0 - 1.0
+        return self.fwd_renderer(image3d * 0.5 + 0.5/image3d.shape[1], cameras) * 2.0 - 1.0
 
     def forward_volume(self, image2d, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False): 
         return self.inv_renderer(image2d, elev.squeeze(1), azim.squeeze(1) * 900, n_views, 
@@ -172,8 +172,8 @@ class NeRVLightningModule(LightningModule):
             elev=torch.cat([timezeros.view(view_shape_), timezeros.view(view_shape_)]),
             azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
             n_views=[1, 1],
-            resample_clarity=False, 
-            resample_volumes=True,
+            resample_clarity=True, 
+            resample_volumes=False,
         )
             
         output_ct_volume_random, output_ct_volume_hidden = torch.split(output_dx_volume, batchsz)    
