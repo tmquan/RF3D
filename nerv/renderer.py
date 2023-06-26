@@ -252,7 +252,7 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             max_depth=4.0,
         )        
         
-    def forward(self, figures, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False):
+    def forward(self, figures, dist, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False):
         _device = figures.device
         B = figures.shape[0]
         assert B==sum(n_views) # batch must be equal to number of projections
@@ -265,7 +265,7 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             x = torch.linspace(-1, 1, steps=self.vol_shape, device=_device)
             coords = torch.stack(torch.meshgrid(x, y, z), dim=-1).view(-1, 3).unsqueeze(0).repeat(B, 1, 1) # 1 DHW 3 to B DHW 3
             # Process (resample) the clarity from ray views to ndc
-            dist = 10.0 * torch.ones(B, device=_device)
+            dist = dist * torch.ones(B, device=_device)
             cameras = make_cameras_dea(dist, elev, azim)
             
             points = cameras.transform_points_ndc(coords) # world to ndc, 1 DHW 3
@@ -310,7 +310,7 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             x = torch.linspace(-1, 1, steps=self.vol_shape, device=_device)
             coords = torch.stack(torch.meshgrid(x, y, z), dim=-1).view(-1, 3).unsqueeze(0).repeat(B, 1, 1) # 1 DHW 3 to B DHW 3
             # Process (resample) the clarity from ray views to ndc
-            dist = 10.0 * torch.ones(B, device=_device)
+            dist = dist * torch.ones(B, device=_device)
             cameras = make_cameras_dea(dist, elev, azim)
             
             points = cameras.transform_points_ndc(coords) # world to ndc, 1 DHW 3
