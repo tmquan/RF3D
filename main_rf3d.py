@@ -171,7 +171,7 @@ class RF3DLightningModule(LightningModule):
             n_views=[1], 
             resample_clarity=True, 
             resample_volumes=False,
-        ).detach()
+        ).sum(dim=1, keepdim=True).detach()
                 
         # Construct the samples in 2D
         figure_ct_random = self.forward_screen(image3d=image3d, cameras=view_random)
@@ -247,7 +247,7 @@ class RF3DLightningModule(LightningModule):
             pass
         elif self.ddim_noise_scheduler.prediction_type=="sample": 
             im3d_loss_ct = self.l1loss(output_ct_volume.sum(dim=1, keepdim=True), image3d) 
-            im3d_loss_xr = self.l1loss(output_xr_volume, volume_xr_nograd) 
+            im3d_loss_xr = self.l1loss(output_xr_volume.sum(dim=1, keepdim=True), volume_xr_nograd) 
             # im3d_loss = im3d_loss_ct + im3d_loss_xr
             im3d_loss = im3d_loss_ct
             self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
@@ -327,7 +327,7 @@ class RF3DLightningModule(LightningModule):
                                figure_ct_second, 
                                gen_volume_ct_random[..., self.vol_shape//2, :],
                                ], dim=-2).transpose(2, 3),
-                    torch.cat([volume_xr_nograd.sum(dim=1, keepdim=True)[..., self.vol_shape//2, :],
+                    torch.cat([volume_xr_nograd[..., self.vol_shape//2, :],
                                figure_xr_hidden, figure_xr_latent, figure_xr_interp, 
                                volume_xr_second[..., self.vol_shape//2, :],
                                figure_xr_second,
