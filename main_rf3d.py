@@ -164,7 +164,7 @@ class RF3DLightningModule(LightningModule):
         
         volume_xr_nograd = self.forward_volume(
             image2d=image2d, 
-            timesteps=timemones,
+            timesteps=timezeros,
             dist=6.0,
             elev=elev_hidden.view(view_shape_), 
             azim=azim_hidden.view(view_shape_), 
@@ -228,7 +228,7 @@ class RF3DLightningModule(LightningModule):
         else:
             output_dx_volume = self.forward_volume(
                 image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
-                timesteps=timemones,
+                timesteps=timezeros,
                 dist=6.0,
                 elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                 azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
@@ -308,7 +308,7 @@ class RF3DLightningModule(LightningModule):
                 # Additionally estimate the volume
                 volume_output = self.forward_volume(
                     image2d=torch.cat([figure_ct_random, figure_xr_hidden]), 
-                    timesteps=timemones,
+                    timesteps=timezeros,
                     dist=6.0,
                     elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
