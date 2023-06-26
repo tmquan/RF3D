@@ -252,12 +252,12 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             max_depth=4.0,
         )        
         
-    def forward(self, figures, dist, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False):
+    def forward(self, figures, timestep, dist, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False):
         _device = figures.device
         B = figures.shape[0]
         assert B==sum(n_views) # batch must be equal to number of projections
         clarity = self.clarity_net(
-            figures, timestep=elev, class_labels=azim).sample.view(-1, 1, self.n_pts_per_ray, self.img_shape, self.img_shape)
+            figures, timestep=timestep, class_labels=azim*900).sample.view(-1, 1, self.n_pts_per_ray, self.img_shape, self.img_shape)
 
         if resample_clarity:
             z = torch.linspace(-1, 1, steps=self.vol_shape, device=_device)
@@ -266,7 +266,7 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             coords = torch.stack(torch.meshgrid(x, y, z), dim=-1).view(-1, 3).unsqueeze(0).repeat(B, 1, 1) # 1 DHW 3 to B DHW 3
             # Process (resample) the clarity from ray views to ndc
             dist = dist * torch.ones(B, device=_device)
-            cameras = make_cameras_dea(dist, elev, azim)
+            cameras = make_cameras_dea(dist, elev, azim, fov=30, znear=4, zfar=8)
             
             points = cameras.transform_points_ndc(coords) # world to ndc, 1 DHW 3
             values = F.grid_sample(
@@ -311,7 +311,7 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             coords = torch.stack(torch.meshgrid(x, y, z), dim=-1).view(-1, 3).unsqueeze(0).repeat(B, 1, 1) # 1 DHW 3 to B DHW 3
             # Process (resample) the clarity from ray views to ndc
             dist = dist * torch.ones(B, device=_device)
-            cameras = make_cameras_dea(dist, elev, azim)
+            cameras = make_cameras_dea(dist, elev, azim, fov=30, znear=4, zfar=8)
             
             points = cameras.transform_points_ndc(coords) # world to ndc, 1 DHW 3
             values = F.grid_sample(
