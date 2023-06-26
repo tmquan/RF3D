@@ -137,8 +137,8 @@ class RF3DLightningModule(LightningModule):
     def forward_screen(self, image3d, cameras):   
         return self.fwd_renderer(image3d * 0.5 + 0.5/image3d.shape[1], cameras) * 2.0 - 1.0
 
-    def forward_volume(self, image2d, timestep, dist, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False): 
-        return self.inv_renderer(image2d, timestep, dist, elev.squeeze(1), azim.squeeze(1), n_views, 
+    def forward_volume(self, image2d, timesteps, dist, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False): 
+        return self.inv_renderer(image2d, timesteps, dist, elev.squeeze(1), azim.squeeze(1), n_views, 
                                  resample_clarity=resample_clarity, resample_volumes=resample_volumes) 
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
@@ -164,7 +164,7 @@ class RF3DLightningModule(LightningModule):
         
         volume_xr_nograd = self.forward_volume(
             image2d=image2d, 
-            timestep=timemones.view(view_shape_),
+            timesteps=timemones,
             dist=6.0,
             elev=elev_hidden.view(view_shape_), 
             azim=azim_hidden.view(view_shape_), 
@@ -195,7 +195,7 @@ class RF3DLightningModule(LightningModule):
             
             output_dx_volume = self.forward_volume(
                 image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
-                timestep=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
+                timesteps=timesteps,
                 dist=6.0,
                 elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                 azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
@@ -216,7 +216,7 @@ class RF3DLightningModule(LightningModule):
             
             output_dx_volume = self.forward_volume(
                 image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
-                timestep=torch.cat([timesteps.view(view_shape_), timesteps.view(view_shape_)]),
+                timesteps=timesteps,
                 dist=6.0,
                 elev=torch.cat([elev_hidden.view(view_shape_), elev_random.view(view_shape_)]),
                 azim=torch.cat([azim_hidden.view(view_shape_), azim_random.view(view_shape_)]),
@@ -227,7 +227,7 @@ class RF3DLightningModule(LightningModule):
         else:
             output_dx_volume = self.forward_volume(
                 image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
-                timestep=torch.cat([timemones.view(view_shape_), timemones.view(view_shape_)]),
+                timesteps=timemones,
                 dist=6.0,
                 elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                 azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
@@ -278,7 +278,7 @@ class RF3DLightningModule(LightningModule):
                     # 1. predict noise model_output
                     tensor_output = self.forward_volume(
                         image2d=figure_output, #torch.cat([figure_ct_latent, figure_xr_latent]),
-                        timestep=torch.cat([t.view(view_shape_), t.view(view_shape_)]).to(_device),
+                        timesteps=t,
                         dist=6.0,
                         elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                         azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
@@ -305,7 +305,7 @@ class RF3DLightningModule(LightningModule):
                 # Additionally estimate the volume
                 volume_output = self.forward_volume(
                     image2d=torch.cat([figure_ct_random, figure_xr_hidden]), 
-                    timestep=torch.cat([timemones.view(view_shape_), timemones.view(view_shape_)]).to(_device),
+                    timesteps=timemones,
                     dist=6.0,
                     elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),

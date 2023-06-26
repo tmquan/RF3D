@@ -252,12 +252,12 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             max_depth=4.0,
         )        
         
-    def forward(self, figures, timestep, dist, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False):
+    def forward(self, figures, timesteps, dist, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False):
         _device = figures.device
         B = figures.shape[0]
         assert B==sum(n_views) # batch must be equal to number of projections
         clarity = self.clarity_net(
-            figures, timestep=timestep, class_labels=azim*900).sample.view(-1, 1, self.n_pts_per_ray, self.img_shape, self.img_shape)
+            figures, timestep=timesteps.squeeze(), class_labels=azim*900).sample.view(-1, 1, self.n_pts_per_ray, self.img_shape, self.img_shape)
 
         if resample_clarity:
             z = torch.linspace(-1, 1, steps=self.vol_shape, device=_device)
