@@ -151,8 +151,8 @@ class RF3DLightningModule(LightningModule):
             
         # Construct the random cameras, -1 and 1 are the same point in azimuths
         dist_random = 6.0 * torch.ones(self.batch_size, device=_device)
-        elev_random = torch.zeros(self.batch_size, device=_device)
-        azim_random = torch.rand_like(elev_random) * 2 - 1 # [0 1) to [-1 1)
+        elev_random = torch.rand_like(dist_random) - 0.5
+        azim_random = torch.rand_like(dist_random) * 2 - 1 # [0 1) to [-1 1)
         view_random = make_cameras_dea(dist_random, elev_random, azim_random, fov=30, znear=4, zfar=8)
 
         dist_hidden = 6.0 * torch.ones(self.batch_size, device=_device)
