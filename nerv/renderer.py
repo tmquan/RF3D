@@ -193,7 +193,6 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
                 "UpBlock2D",
                 "UpBlock2D",    
             ),
-            class_embed_type="timestep",
         )
 
         self.density_net = nn.Sequential(
