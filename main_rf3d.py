@@ -172,10 +172,12 @@ class RF3DLightningModule(LightningModule):
         volume_ct_latent = torch.randn_like(image3d)
         volume_xr_latent = torch.randn_like(image3d)
         
-        figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random)
+        # figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random)
+        volume_ct_interp = self.ddim_noise_scheduler.add_noise(image3d, volume_ct_latent, timesteps=timesteps)
         figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_hidden)
         
-        figure_ct_interp = self.ddim_noise_scheduler.add_noise(figure_ct_random, figure_ct_latent, timesteps=timesteps)
+        # figure_ct_interp = self.ddim_noise_scheduler.add_noise(figure_ct_random, figure_ct_latent, timesteps=timesteps)
+        figure_ct_interp = self.forward_screen(volume_ct_interp, cameras=view_random)
         figure_xr_interp = self.ddim_noise_scheduler.add_noise(figure_xr_hidden, figure_xr_latent, timesteps=timesteps)
                         
         if batch_idx%2==0:
