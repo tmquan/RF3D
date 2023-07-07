@@ -10,9 +10,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+from torch.distributed.fsdp.wrap import wrap
 torch.set_float32_matmul_precision('medium')
 
-from typing import Optional
+from typing import Optional, NamedTuple
 from lightning_fabric.utilities.seed import seed_everything
 from lightning import Trainer, LightningModule
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -48,11 +49,11 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
         res = res[..., None]
     return res.expand(broadcast_shape)
 
+
 class RF3DLightningModule(LightningModule):
     def __init__(self, hparams, **kwargs):
         super().__init__()
         self.lr = hparams.lr
-        self.gan = hparams.gan
         self.img = hparams.img
         self.vol = hparams.vol
         self.cam = hparams.cam
@@ -137,9 +138,25 @@ class RF3DLightningModule(LightningModule):
     def forward_screen(self, image3d, cameras):   
         return self.fwd_renderer(image3d * 0.5 + 0.5/image3d.shape[1], cameras) * 2.0 - 1.0
 
-    def forward_volume(self, image2d, timesteps, dist, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False): 
-        return self.inv_renderer(image2d, timesteps, dist, elev.squeeze(1), azim.squeeze(1), n_views, 
-                                 resample_clarity=resample_clarity, resample_volumes=resample_volumes) 
+    def forward_volume(self, 
+                       image2d, 
+                       timesteps, 
+                       dist, 
+                       elev, 
+                       azim, 
+                       path=0, 
+                       n_views=[2, 1], 
+                       resample_clarity=False, 
+                       resample_volumes=False): 
+        return self.inv_renderer(image2d, 
+                                 timesteps, 
+                                 dist, 
+                                 elev.squeeze(1), 
+                                 azim.squeeze(1), 
+                                 path, 
+                                 n_views, 
+                                 resample_clarity=resample_clarity, 
+                                 resample_volumes=resample_volumes) 
 
     def _common_step(self, batch, batch_idx, optimizer_idx, stage: Optional[str] = 'evaluation'):
         _device = batch["image3d"].device
@@ -162,12 +179,18 @@ class RF3DLightningModule(LightningModule):
         
         view_shape_ = [self.batch_size, 1] 
         
+        path_diffuse = 1.0 * torch.ones(self.batch_size, device=_device)
+        path_inverse = 0.0 * torch.ones(self.batch_size, device=_device)
+        
+        path_shape_ = [self.batch_size, 1]
+        
         volume_xr_nograd = self.forward_volume(
             image2d=image2d, 
             timesteps=timezeros,
             dist=6.0,
             elev=elev_hidden.view(view_shape_), 
             azim=azim_hidden.view(view_shape_), 
+            path=path_inverse, 
             n_views=[1], 
             resample_clarity=True, 
             resample_volumes=False,
@@ -175,8 +198,6 @@ class RF3DLightningModule(LightningModule):
                 
         # Construct the samples in 2D
         figure_ct_random = self.forward_screen(image3d=image3d, cameras=view_random)
-        figure_ct_hidden = self.forward_screen(image3d=image3d, cameras=view_hidden)
-        # figure_xr_random = self.forward_screen(image3d=volume_xr_nograd, cameras=view_random) 
         figure_xr_hidden = image2d 
         
         # Diffusion step
@@ -190,81 +211,75 @@ class RF3DLightningModule(LightningModule):
         volume_xr_interp = self.ddim_noise_scheduler.add_noise(volume_xr_nograd.sum(dim=1, keepdim=True), 
                                                                volume_xr_latent, 
                                                                timesteps=timesteps)
-                        
-        if batch_idx%4==0:
-            figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random)
-            figure_ct_interp = self.forward_screen(image3d=volume_ct_interp, cameras=view_random)
-                    
-            figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_hidden)
-            figure_xr_interp = self.forward_screen(image3d=volume_xr_interp, cameras=view_hidden)
-            
-            output_dx_volume = self.forward_volume(
+        
+        figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random)
+        figure_ct_interp = self.forward_screen(image3d=volume_ct_interp, cameras=view_random)
+                
+        figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_hidden)
+        figure_xr_interp = self.forward_screen(image3d=volume_xr_interp, cameras=view_hidden)
+        
+        output_ct_figure_diffuse_random = torch.zeros_like(image2d)
+        output_xr_figure_diffuse_hidden = torch.zeros_like(image2d)
+        output_ct_figure_inverse_random = torch.zeros_like(image2d)
+        output_xr_figure_inverse_hidden = torch.zeros_like(image2d)
+        
+        if batch_idx%2==0:
+            # Diffuse constraint
+            output_dx_volume_diffuse = self.forward_volume(
                 image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
                 timesteps=timesteps,
                 dist=6.0,
                 elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                 azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+                path=path_diffuse,
                 n_views=[1, 1],
                 resample_clarity=True, 
-                resample_volumes=False,
+                resample_volumes=False,                
             )
-        elif batch_idx%4==1:
-            figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_hidden)
-            figure_ct_interp = self.forward_screen(image3d=volume_ct_interp, cameras=view_hidden)
-                    
-            figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_random)
-            figure_xr_interp = self.forward_screen(image3d=volume_xr_interp, cameras=view_random)
-            
-            output_dx_volume = self.forward_volume(
+            output_ct_volume_diffuse, output_xr_volume_diffuse = torch.split(output_dx_volume_diffuse, batchsz)    
+            output_ct_figure_diffuse_random = self.forward_screen(image3d=output_ct_volume_diffuse, cameras=view_random)
+            output_xr_figure_diffuse_hidden = self.forward_screen(image3d=output_xr_volume_diffuse, cameras=view_hidden)
+        
+        elif batch_idx%2==1:
+            # Direct constraint
+            output_dx_volume_inverse = self.forward_volume(
                 image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
                 timesteps=timesteps,
                 dist=6.0,
-                elev=torch.cat([elev_hidden.view(view_shape_), elev_random.view(view_shape_)]),
-                azim=torch.cat([azim_hidden.view(view_shape_), azim_random.view(view_shape_)]),
-                n_views=[1, 1],
-                resample_clarity=True, 
-                resample_volumes=False,
-            )
-        else:
-            output_dx_volume = self.forward_volume(
-                image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
-                timesteps=timezeros,
-                dist=6.0,
                 elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                 azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+                path=path_inverse,
                 n_views=[1, 1],
                 resample_clarity=True, 
-                resample_volumes=False,
+                resample_volumes=False,                
             )
-            
-        output_ct_volume, output_xr_volume = torch.split(output_dx_volume, batchsz)    
-        
-        output_ct_random = self.forward_screen(image3d=output_ct_volume, cameras=view_random)
-        output_xr_random = self.forward_screen(image3d=output_xr_volume, cameras=view_random)
-        output_ct_hidden = self.forward_screen(image3d=output_ct_volume, cameras=view_hidden)
-        output_xr_hidden = self.forward_screen(image3d=output_xr_volume, cameras=view_hidden)
-        
+            output_ct_volume_inverse, output_xr_volume_inverse = torch.split(output_dx_volume_inverse, batchsz)    
+            output_ct_figure_inverse_random = self.forward_screen(image3d=output_ct_volume_inverse, cameras=view_random)
+            output_xr_figure_inverse_hidden = self.forward_screen(image3d=output_xr_volume_inverse, cameras=view_hidden)
+      
         if self.ddim_noise_scheduler.prediction_type=="epsilon":
             pass
         elif self.ddim_noise_scheduler.prediction_type=="sample": 
-            im3d_loss_ct = self.l1loss(output_ct_volume.sum(dim=1, keepdim=True), image3d) 
-            # im3d_loss_xr = self.l1loss(output_xr_volume, volume_xr_nograd) 
-            # im3d_loss = im3d_loss_ct + im3d_loss_xr
+            if batch_idx%2==0:
+                im3d_loss_ct = self.l1loss(output_ct_volume_diffuse.sum(dim=1, keepdim=True), image3d) 
+                im2d_loss_ct = self.l1loss(output_ct_figure_diffuse_random, figure_ct_random) 
+                im2d_loss_xr = self.l1loss(output_xr_figure_diffuse_hidden, figure_xr_hidden) 
+            elif batch_idx%2==1:
+                im3d_loss_ct = self.l1loss(output_ct_volume_inverse.sum(dim=1, keepdim=True), volume_ct_interp)
+                im2d_loss_ct = self.l1loss(output_ct_figure_inverse_random, figure_ct_interp) 
+                im2d_loss_xr = self.l1loss(output_xr_figure_inverse_hidden, figure_xr_interp)       
+                          
             im3d_loss = im3d_loss_ct
             self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), 
                      prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
-            im2d_loss_ct_random = self.l1loss(output_ct_random, figure_ct_random) 
-            im2d_loss_ct_hidden = self.l1loss(output_ct_hidden, figure_ct_hidden) 
-            # im2d_loss_xr_random = self.l1loss(output_xr_random, figure_xr_random) 
-            im2d_loss_xr_hidden = self.l1loss(output_xr_hidden, image2d) 
-            
-            im2d_loss = 2*im2d_loss_ct_random + im2d_loss_ct_hidden + im2d_loss_xr_hidden 
+            im2d_loss = im2d_loss_ct + im2d_loss_xr
             self.log(f'{stage}_im2d_loss', im2d_loss, on_step=(stage=='train'), 
                      prog_bar=True, logger=True, sync_dist=True, batch_size=self.batch_size)
             
             loss = self.alpha*im3d_loss + self.gamma*im2d_loss
 
+            
             # alpha_t = _extract_into_tensor(
             #     self.ddim_noise_scheduler.alphas_cumprod.to(_device), timesteps, (image3d.shape[0], 1, 1, 1, 1)
             # )
@@ -285,6 +300,7 @@ class RF3DLightningModule(LightningModule):
                         dist=6.0,
                         elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                         azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+                        path=path_diffuse,
                         n_views=[1, 1]
                     )
                     # Perform Post activation like DVGO      
@@ -312,6 +328,7 @@ class RF3DLightningModule(LightningModule):
                     dist=6.0,
                     elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                     azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+                    path=path_inverse,
                     n_views=[1, 1]
                 )
                 figure_output = self.forward_screen(image3d=volume_output, 
@@ -327,20 +344,17 @@ class RF3DLightningModule(LightningModule):
                     torch.cat([image3d[..., self.vol_shape//2, :],
                                figure_ct_random, figure_ct_latent, figure_ct_interp, 
                                volume_ct_second[..., self.vol_shape//2, :],
-                               figure_ct_second, 
                                gen_volume_ct_random[..., self.vol_shape//2, :],
                                ], dim=-2).transpose(2, 3),
                     torch.cat([volume_xr_nograd.sum(dim=1, keepdim=True)[..., self.vol_shape//2, :],
                                figure_xr_hidden, figure_xr_latent, figure_xr_interp, 
                                volume_xr_second[..., self.vol_shape//2, :],
-                               figure_xr_second,
                                gen_volume_xr_hidden[..., self.vol_shape//2, :], 
                                ], dim=-2).transpose(2, 3),
-                    torch.cat([output_ct_random,
-                               output_ct_hidden, 
-                               output_xr_random,
-                               output_xr_hidden, 
-                               figure_dx_zeros_,
+                    torch.cat([output_ct_figure_diffuse_random,
+                               output_xr_figure_diffuse_hidden,
+                               figure_ct_second, 
+                               figure_xr_second, 
                                gen_figure_ct_random, 
                                gen_figure_xr_hidden, 
                                ], dim=-2).transpose(2, 3),                    
@@ -395,7 +409,6 @@ if __name__ == "__main__":
     parser.add_argument("--sh", type=int, default=0, help="degree of spherical harmonic (2, 3)")
     parser.add_argument("--pe", type=int, default=0, help="positional encoding (0 - 8)")
     
-    parser.add_argument("--gan", action="store_true", help="whether to train with GAN")
     parser.add_argument("--img", action="store_true", help="whether to train with XR")
     parser.add_argument("--vol", action="store_true", help="whether to train with CT")
     parser.add_argument("--cam", action="store_true", help="train cam locked or hidden")
@@ -416,6 +429,7 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", type=str, default=None, help="path to checkpoint")
     parser.add_argument("--logsdir", type=str, default='logs', help="logging directory")
     parser.add_argument("--datadir", type=str, default='data', help="data directory")
+    parser.add_argument("--strategy", type=str, default='auto', help="training strategy")
     parser.add_argument("--backbone", type=str, default='efficientnet-b7', help="Backbone for network")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     
@@ -429,7 +443,7 @@ if __name__ == "__main__":
 
     # Callback
     checkpoint_callback = ModelCheckpoint(
-        dirpath=f"{hparams.logsdir}_sh{hparams.sh}_pe{hparams.pe}_gan{int(hparams.gan)}_vol{int(hparams.vol)}_cam{int(hparams.cam)}_sup{int(hparams.sup)}_img{int(hparams.img)}",
+        dirpath=f"{hparams.logsdir}_sh{hparams.sh}_pe{hparams.pe}_vol{int(hparams.vol)}_cam{int(hparams.cam)}_sup{int(hparams.sup)}_img{int(hparams.img)}",
         # filename='epoch={epoch}-validation_loss={validation_loss_epoch:.2f}',
         monitor="validation_loss_epoch",
         auto_insert_metric_name=True, 
@@ -441,28 +455,26 @@ if __name__ == "__main__":
 
     # Logger
     tensorboard_logger = TensorBoardLogger(
-        save_dir=f"{hparams.logsdir}_sh{hparams.sh}_pe{hparams.pe}_gan{int(hparams.gan)}_vol{int(hparams.vol)}_cam{int(hparams.cam)}_sup{int(hparams.sup)}_img{int(hparams.img)}", 
+        save_dir=f"{hparams.logsdir}_sh{hparams.sh}_pe{hparams.pe}_vol{int(hparams.vol)}_cam{int(hparams.cam)}_sup{int(hparams.sup)}_img{int(hparams.img)}", 
         log_graph=True
     )
     swa_callback = StochasticWeightAveraging(swa_lrs=1e-2)
+    callbacks=[
+        lr_callback,
+        checkpoint_callback,
+    ]
+    if hparams.strategy!= "fsdp":
+         callbacks.append(swa_callback)
     # Init model with callbacks
     trainer = Trainer(
         accelerator=hparams.accelerator,
         devices=hparams.devices,
         max_epochs=hparams.epochs,
         logger=[tensorboard_logger],
-        callbacks=[
-            lr_callback,
-            checkpoint_callback,
-            swa_callback if not hparams.gan else None,
-        ],
-        accumulate_grad_batches=4 if not hparams.gan else 1,
-        strategy="auto", #"auto", #"ddp_find_unused_parameters_true", 
+        callbacks=callbacks,
+        accumulate_grad_batches=4,
+        strategy=hparams.strategy, #"auto", #"ddp_find_unused_parameters_true", 
         precision=16 if hparams.amp else 32,
-        # gradient_clip_val=0.01, 
-        # gradient_clip_algorithm="value"
-        # stochastic_weight_avg=True if not hparams.gan else False,
-        # deterministic=False,
         profiler="advanced"
     )
 

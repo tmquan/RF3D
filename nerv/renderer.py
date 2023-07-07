@@ -193,6 +193,7 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
                 "UpBlock2D",
                 "UpBlock2D",    
             ),
+            class_embed_type="timestep",
         )
 
         self.density_net = nn.Sequential(
@@ -251,12 +252,13 @@ class NeRVFrontToBackInverseRenderer(nn.Module):
             max_depth=4.0,
         )        
         
-    def forward(self, figures, timesteps, dist, elev, azim, n_views=[2, 1], resample_clarity=False, resample_volumes=False):
+    def forward(self, figures, timesteps, dist, elev, azim, path=0, n_views=[2, 1], resample_clarity=False, resample_volumes=False):
         _device = figures.device
         B = figures.shape[0]
         assert B==sum(n_views) # batch must be equal to number of projections
         clarity = self.clarity_net(
             figures, 
+            class_labels=path,
             timestep=timesteps.squeeze()
         ).sample.view(-1, 1, self.n_pts_per_ray, self.img_shape, self.img_shape)
 
