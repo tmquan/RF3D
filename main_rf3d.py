@@ -234,7 +234,8 @@ class RF3DLightningModule(LightningModule):
             volume_ct_diffuse, volume_xr_diffuse = torch.split(volume_dx_diffuse, batchsz)    
             figure_ct_diffuse = self.forward_screen(image3d=volume_ct_diffuse, cameras=view_random)
             figure_xr_diffuse = self.forward_screen(image3d=volume_xr_diffuse, cameras=view_hidden)
-        
+            volume_ct_diffuse = volume_ct_diffuse.sum(dim=1, keepdim=True)
+            volume_xr_diffuse = volume_xr_diffuse.sum(dim=1, keepdim=True)
         elif batch_idx%2==1:         
             volume_dx_inverse = self.forward_volume(
                 image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
@@ -250,17 +251,18 @@ class RF3DLightningModule(LightningModule):
             volume_ct_inverse, volume_xr_inverse = torch.split(volume_dx_inverse, batchsz)    
             figure_ct_inverse = self.forward_screen(image3d=volume_ct_inverse, cameras=view_random)
             figure_xr_inverse = self.forward_screen(image3d=volume_xr_inverse, cameras=view_hidden)
-            
+            volume_ct_inverse = volume_ct_inverse.sum(dim=1, keepdim=True)
+            volume_xr_inverse = volume_xr_inverse.sum(dim=1, keepdim=True)
       
         if self.ddim_noise_scheduler.prediction_type=="epsilon":
             pass
         elif self.ddim_noise_scheduler.prediction_type=="sample": 
             if batch_idx%2==0:
-                im3d_loss_ct = self.l1loss(volume_ct_diffuse.sum(dim=1, keepdim=True), image3d) 
+                im3d_loss_ct = self.l1loss(volume_ct_diffuse, image3d) 
                 im2d_loss_ct = self.l1loss(figure_ct_diffuse, figure_ct_random) 
                 im2d_loss_xr = self.l1loss(figure_xr_diffuse, figure_xr_hidden) 
             elif batch_idx%2==1:      
-                im3d_loss_ct = self.l1loss(volume_ct_inverse.sum(dim=1, keepdim=True), image3d)
+                im3d_loss_ct = self.l1loss(volume_ct_inverse, image3d)
                 im2d_loss_ct = self.l1loss(figure_ct_inverse, figure_ct_random) 
                 im2d_loss_xr = self.l1loss(figure_xr_inverse, figure_xr_hidden)       
                           
