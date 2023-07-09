@@ -219,24 +219,6 @@ class RF3DLightningModule(LightningModule):
         figure_xr_interp = self.forward_screen(image3d=volume_xr_interp, cameras=view_hidden)
         
         if batch_idx%2==0:
-            # Diffuse constraint
-            volume_dx_diffuse = self.forward_volume(
-                image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
-                timesteps=timesteps,
-                dist=6.0,
-                elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
-                azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-                path=path_diffuse,
-                n_views=[1, 1],
-                resample_clarity=True, 
-                resample_volumes=False,                
-            )
-            volume_ct_diffuse, volume_xr_diffuse = torch.split(volume_dx_diffuse, batchsz)    
-            figure_ct_diffuse = self.forward_screen(image3d=volume_ct_diffuse, cameras=view_random)
-            figure_xr_diffuse = self.forward_screen(image3d=volume_xr_diffuse, cameras=view_hidden)
-            volume_ct_diffuse = volume_ct_diffuse.sum(dim=1, keepdim=True)
-            volume_xr_diffuse = volume_xr_diffuse.sum(dim=1, keepdim=True)
-        elif batch_idx%2==1:         
             volume_dx_inverse = self.forward_volume(
                 image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
                 timesteps=timezeros,
@@ -254,17 +236,36 @@ class RF3DLightningModule(LightningModule):
             volume_ct_inverse = volume_ct_inverse.sum(dim=1, keepdim=True)
             volume_xr_inverse = volume_xr_inverse.sum(dim=1, keepdim=True)
       
+        elif batch_idx%2==1:         
+            # Diffuse constraint
+            volume_dx_diffuse = self.forward_volume(
+                image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
+                timesteps=timesteps,
+                dist=6.0,
+                elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
+                azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+                path=path_diffuse,
+                n_views=[1, 1],
+                resample_clarity=True, 
+                resample_volumes=False,                
+            )
+            volume_ct_diffuse, volume_xr_diffuse = torch.split(volume_dx_diffuse, batchsz)    
+            figure_ct_diffuse = self.forward_screen(image3d=volume_ct_diffuse, cameras=view_random)
+            figure_xr_diffuse = self.forward_screen(image3d=volume_xr_diffuse, cameras=view_hidden)
+            volume_ct_diffuse = volume_ct_diffuse.sum(dim=1, keepdim=True)
+            volume_xr_diffuse = volume_xr_diffuse.sum(dim=1, keepdim=True)
+            
         if self.ddim_noise_scheduler.prediction_type=="epsilon":
             pass
         elif self.ddim_noise_scheduler.prediction_type=="sample": 
             if batch_idx%2==0:
-                im3d_loss_ct = self.l1loss(volume_ct_diffuse, image3d) 
-                im2d_loss_ct = self.l1loss(figure_ct_diffuse, figure_ct_random) 
-                im2d_loss_xr = self.l1loss(figure_xr_diffuse, figure_xr_hidden) 
-            elif batch_idx%2==1:      
                 im3d_loss_ct = self.l1loss(volume_ct_inverse, image3d)
                 im2d_loss_ct = self.l1loss(figure_ct_inverse, figure_ct_random) 
-                im2d_loss_xr = self.l1loss(figure_xr_inverse, figure_xr_hidden)       
+                im2d_loss_xr = self.l1loss(figure_xr_inverse, figure_xr_hidden) 
+            elif batch_idx%2==1:      
+                im3d_loss_ct = self.l1loss(volume_ct_diffuse, image3d) 
+                im2d_loss_ct = self.l1loss(figure_ct_diffuse, figure_ct_random) 
+                im2d_loss_xr = self.l1loss(figure_xr_diffuse, figure_xr_hidden)       
                           
             im3d_loss = im3d_loss_ct
             self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), 
@@ -283,7 +284,7 @@ class RF3DLightningModule(LightningModule):
             # loss = snr_weights * loss
                     
         # Visualization step 
-        if batch_idx==0:
+        if batch_idx==2:
             with torch.no_grad():
                 volume_output_sampled = torch.cat([volume_ct_latent.clone(), volume_xr_latent.clone()])
                 figure_output_sampled = torch.cat([figure_ct_latent.clone(), figure_xr_latent.clone()])
@@ -342,6 +343,7 @@ class RF3DLightningModule(LightningModule):
                                figure_ct_interp, 
                                volume_ct_diffuse[..., self.vol_shape//2, :],
                                figure_ct_diffuse,
+                               figure_ct_inverse,
                                volume_ct_sampled[..., self.vol_shape//2, :],
                                figure_ct_sampled,
                                ], dim=-2).transpose(2, 3),
@@ -349,7 +351,8 @@ class RF3DLightningModule(LightningModule):
                                figure_xr_hidden, 
                                figure_xr_interp, 
                                volume_xr_diffuse[..., self.vol_shape//2, :], 
-                               figure_xr_diffuse,
+                               figure_xr_diffuse, 
+                               figure_xr_inverse,
                                volume_xr_sampled[..., self.vol_shape//2, :],
                                figure_xr_sampled,
                                ], dim=-2).transpose(2, 3),                    
