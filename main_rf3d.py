@@ -284,7 +284,7 @@ class RF3DLightningModule(LightningModule):
             # loss = snr_weights * loss
                     
         # Visualization step 
-        if batch_idx==2:
+        if batch_idx==0:
             with torch.no_grad():
                 volume_output_sampled = torch.cat([volume_ct_latent.clone(), volume_xr_latent.clone()])
                 figure_output_sampled = torch.cat([figure_ct_latent.clone(), figure_xr_latent.clone()])
@@ -341,8 +341,7 @@ class RF3DLightningModule(LightningModule):
                     torch.cat([image3d[..., self.vol_shape//2, :],
                                figure_ct_random, 
                                figure_ct_interp, 
-                               volume_ct_diffuse[..., self.vol_shape//2, :],
-                               figure_ct_diffuse,
+                               volume_ct_inverse[..., self.vol_shape//2, :],
                                figure_ct_inverse,
                                volume_ct_sampled[..., self.vol_shape//2, :],
                                figure_ct_sampled,
@@ -350,8 +349,7 @@ class RF3DLightningModule(LightningModule):
                     torch.cat([volume_xr_nograd.sum(dim=1, keepdim=True)[..., self.vol_shape//2, :],
                                figure_xr_hidden, 
                                figure_xr_interp, 
-                               volume_xr_diffuse[..., self.vol_shape//2, :], 
-                               figure_xr_diffuse, 
+                               volume_xr_inverse[..., self.vol_shape//2, :], 
                                figure_xr_inverse,
                                volume_xr_sampled[..., self.vol_shape//2, :],
                                figure_xr_sampled,
