@@ -120,6 +120,7 @@ class RF3DLightningModule(LightningModule):
             out_channels=self.sh**2 if self.sh>0 else 1, 
             vol_shape=self.vol_shape, 
             img_shape=self.img_shape, 
+            n_pts_per_ray=self.n_pts_per_ray,
             sh=self.sh, 
             pe=self.pe,
             backbone=self.backbone,
@@ -146,7 +147,7 @@ class RF3DLightningModule(LightningModule):
                        azim, 
                        path=0, 
                        n_views=[2, 1], 
-                       resample_clarity=False, 
+                       resample_clarity=True, 
                        resample_volumes=False): 
         return self.inv_renderer(image2d, 
                                  timesteps, 
@@ -182,8 +183,6 @@ class RF3DLightningModule(LightningModule):
         path_diffuse = 1.0 * torch.ones(self.batch_size, device=_device)
         path_inverse = 0.0 * torch.ones(self.batch_size, device=_device)
         
-        path_shape_ = [self.batch_size, 1]
-        
         volume_xr_nograd = self.forward_volume(
             image2d=image2d, 
             timesteps=timezeros,
@@ -194,49 +193,27 @@ class RF3DLightningModule(LightningModule):
             n_views=[1], 
             resample_clarity=True, 
             resample_volumes=False,
-        ).detach()
+        ).sum(dim=1, keepdim=True).detach()
                 
         # Construct the samples in 2D
         figure_ct_random = self.forward_screen(image3d=image3d, cameras=view_random)
         figure_xr_hidden = image2d 
         
-        # Diffusion step
         timesteps = torch.randint(0, self.ddim_noise_scheduler.config.num_train_timesteps, (batchsz,), device=_device).long()
-        
-        volume_ct_latent = torch.randn_like(image3d)
-        volume_ct_interp = self.ddim_noise_scheduler.add_noise(image3d, 
-                                                               volume_ct_latent, 
-                                                               timesteps=timesteps)
-        volume_xr_latent = torch.randn_like(image3d)
-        volume_xr_interp = self.ddim_noise_scheduler.add_noise(volume_xr_nograd.sum(dim=1, keepdim=True), 
-                                                               volume_xr_latent, 
-                                                               timesteps=timesteps)
-        
-        figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random)
-        figure_ct_interp = self.forward_screen(image3d=volume_ct_interp, cameras=view_random)
-                
-        figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_hidden)
-        figure_xr_interp = self.forward_screen(image3d=volume_xr_interp, cameras=view_hidden)
-        
+            
         if batch_idx%2==0:
-            volume_dx_inverse = self.forward_volume(
-                image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
-                timesteps=timezeros,
-                dist=6.0,
-                elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
-                azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
-                path=path_inverse,
-                n_views=[1, 1],
-                resample_clarity=True, 
-                resample_volumes=False,                
-            )
-            volume_ct_inverse, volume_xr_inverse = torch.split(volume_dx_inverse, batchsz)    
-            figure_ct_inverse = self.forward_screen(image3d=volume_ct_inverse, cameras=view_random)
-            figure_xr_inverse = self.forward_screen(image3d=volume_xr_inverse, cameras=view_hidden)
-            volume_ct_inverse = volume_ct_inverse.sum(dim=1, keepdim=True)
-            volume_xr_inverse = volume_xr_inverse.sum(dim=1, keepdim=True)
-      
-        elif batch_idx%2==1:         
+            # Diffusion step
+            volume_ct_latent = torch.randn_like(image3d)
+            volume_ct_interp = self.ddim_noise_scheduler.add_noise(image3d, volume_ct_latent, timesteps=timesteps)
+            volume_xr_latent = torch.randn_like(image3d)
+            volume_xr_interp = self.ddim_noise_scheduler.add_noise(volume_xr_nograd, volume_xr_latent, timesteps=timesteps)
+            
+            figure_ct_latent = self.forward_screen(image3d=volume_ct_latent, cameras=view_random)
+            figure_ct_interp = self.forward_screen(image3d=volume_ct_interp, cameras=view_random)
+                    
+            figure_xr_latent = self.forward_screen(image3d=volume_xr_latent, cameras=view_hidden)
+            figure_xr_interp = self.forward_screen(image3d=volume_xr_interp, cameras=view_hidden)
+                 
             # Diffuse constraint
             volume_dx_diffuse = self.forward_volume(
                 image2d=torch.cat([figure_ct_interp, figure_xr_interp]),
@@ -245,27 +222,43 @@ class RF3DLightningModule(LightningModule):
                 elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
                 azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
                 path=path_diffuse,
-                n_views=[1, 1],
-                resample_clarity=True, 
-                resample_volumes=False,                
+                n_views=[1, 1],            
             )
             volume_ct_diffuse, volume_xr_diffuse = torch.split(volume_dx_diffuse, batchsz)    
             figure_ct_diffuse = self.forward_screen(image3d=volume_ct_diffuse, cameras=view_random)
             figure_xr_diffuse = self.forward_screen(image3d=volume_xr_diffuse, cameras=view_hidden)
             volume_ct_diffuse = volume_ct_diffuse.sum(dim=1, keepdim=True)
             volume_xr_diffuse = volume_xr_diffuse.sum(dim=1, keepdim=True)
+                  
+        elif batch_idx%2==1:    
+            volume_dx_inverse = self.forward_volume(
+                image2d=torch.cat([figure_ct_random, figure_xr_hidden]),
+                timesteps=timezeros,
+                dist=6.0,
+                elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
+                azim=torch.cat([azim_random.view(view_shape_), azim_hidden.view(view_shape_)]),
+                path=path_inverse,
+                n_views=[1, 1],            
+            )
+            volume_ct_inverse, volume_xr_inverse = torch.split(volume_dx_inverse, batchsz)    
+            figure_ct_inverse = self.forward_screen(image3d=volume_ct_inverse, cameras=view_random)
+            figure_xr_inverse = self.forward_screen(image3d=volume_xr_inverse, cameras=view_hidden)
+            volume_ct_inverse = volume_ct_inverse.sum(dim=1, keepdim=True)
+            volume_xr_inverse = volume_xr_inverse.sum(dim=1, keepdim=True)
+      
             
         if self.ddim_noise_scheduler.prediction_type=="epsilon":
             pass
         elif self.ddim_noise_scheduler.prediction_type=="sample": 
             if batch_idx%2==0:
-                im3d_loss_ct = self.l1loss(volume_ct_inverse, image3d)
-                im2d_loss_ct = self.l1loss(figure_ct_inverse, figure_ct_random) 
-                im2d_loss_xr = self.l1loss(figure_xr_inverse, figure_xr_hidden) 
-            elif batch_idx%2==1:      
                 im3d_loss_ct = self.l1loss(volume_ct_diffuse, image3d) 
                 im2d_loss_ct = self.l1loss(figure_ct_diffuse, figure_ct_random) 
                 im2d_loss_xr = self.l1loss(figure_xr_diffuse, figure_xr_hidden)       
+                
+            elif batch_idx%2==1:      
+                im3d_loss_ct = self.l1loss(volume_ct_inverse, image3d)
+                im2d_loss_ct = self.l1loss(figure_ct_inverse, figure_ct_random) 
+                im2d_loss_xr = self.l1loss(figure_xr_inverse, figure_xr_hidden) 
                           
             im3d_loss = im3d_loss_ct
             self.log(f'{stage}_im3d_loss', im3d_loss, on_step=(stage=='train'), 
@@ -277,11 +270,11 @@ class RF3DLightningModule(LightningModule):
             
             loss = self.alpha*im3d_loss + self.gamma*im2d_loss
 
-            # alpha_t = _extract_into_tensor(
-            #     self.ddim_noise_scheduler.alphas_cumprod.to(_device), timesteps, (image3d.shape[0], 1, 1, 1, 1)
-            # )
-            # snr_weights = alpha_t / (1 - alpha_t)
-            # loss = snr_weights * loss
+            alpha_t = _extract_into_tensor(
+                self.ddim_noise_scheduler.alphas_cumprod.to(_device), timesteps, (image3d.shape[0], 1, 1, 1, 1)
+            )
+            snr_weights = alpha_t / (1 - alpha_t)
+            loss = snr_weights * loss
                     
         # Visualization step 
         if batch_idx==0:
@@ -292,7 +285,7 @@ class RF3DLightningModule(LightningModule):
                 for t in tqdm(self.ddim_noise_scheduler.timesteps):
                     # 1. predict noise model_output
                     tensor_output_sampled = self.forward_volume(
-                        image2d=figure_output_sampled, #torch.cat([figure_ct_latent, figure_xr_latent]),
+                        image2d=figure_output_sampled,
                         timesteps=t,
                         dist=6.0,
                         elev=torch.cat([elev_random.view(view_shape_), elev_hidden.view(view_shape_)]),
